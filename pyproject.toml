@@ -1,6 +1,6 @@
 [project]
 name = "apoc-data"
-version = "0.1.0"
+version = "0.1.1"
 description = "Data from the Alaska Public Offices Commission."
 authors = [
     {name = "Nick Crews", email = "nicholas.b.crews@gmail.com"},
