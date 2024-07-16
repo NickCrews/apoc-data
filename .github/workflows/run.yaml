@@ -1,4 +1,4 @@
-name: Run and Upload
+name: Scrape and Release
 
 on:
   schedule:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run_and_upload:
+  scrape_and_release:
     name: Run and Upload
     runs-on: ubuntu-latest
     steps:
@@ -29,16 +29,7 @@ jobs:
       - name: Scrape Data
         run: pdm run python -m apoc_data.scrape --directory downloads
 
-      - name: Determine tag name
-        id: tag
-        shell: bash
-        run: |
-          DATE_STRING="$(date -u '+%Y%m%d-%H%M%S')"
-          echo "name=${DATE_STRING}" >> $GITHUB_OUTPUT
-      
-      - name: Upload Results
-        uses: softprops/action-gh-release@v1
-        with:
-          files: downloads/*.csv
-          tag_name: ${{ steps.tag.outputs.name }}
-          fail_on_unmatched_files: true
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/release.sh
