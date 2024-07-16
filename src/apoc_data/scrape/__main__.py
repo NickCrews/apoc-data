@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from apoc_data.scrape import scrape_all
+from apoc_data.scrape._scraper import DEFAULT_DIRECTORY
 
 
 def main():
@@ -12,7 +13,7 @@ def main():
     parser.add_argument(
         "--directory",
         type=str,
-        default="scraped/",
+        default=DEFAULT_DIRECTORY,
         help="The directory to save the data to",
     )
     parser.add_argument(

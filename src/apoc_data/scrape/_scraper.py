@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+DEFAULT_DIRECTORY = "scraped/"
+
 
 @asynccontextmanager
 async def make_browser_async(headless: bool = True) -> AsyncIterable[BrowserContext]:
@@ -98,13 +100,12 @@ class _ScraperBase:
 
     def __init__(
         self,
+        *,
         filters: ScrapeFilters | None = None,
-        destination: str | Path | None = None,
+        destination: str | Path,
     ):
+        self.destination = Path(destination)
         self.filters = filters or ScrapeFilters()
-        self.destination = (
-            Path(destination) if destination else self.default_destination(self.filters)
-        )
 
     async def __call__(self, browser_context: BrowserContext) -> None:
         page = (
@@ -136,12 +137,6 @@ class _ScraperBase:
     ) -> None:
         """Run the download in the given browser"""
         asyncio.run(run_scrapers([self], browser_context=browser_context))
-
-    @classmethod
-    def default_destination(cls, filters: ScrapeFilters) -> Path:
-        return Path(
-            f"./scraped/{cls.name}_{filters.report_year.value}_{filters.status.name}.csv"
-        )
 
 
 class CandidateRegistrationScraper(_ScraperBase):
@@ -182,18 +177,14 @@ class IncomeScraper(_ScraperBase):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDIncome.aspx"
     name = "income"
 
-    def __init__(
-        self,
-        filters: ScrapeFilters,
-        destination: str | Path | None = None,
-    ):
+    def __init__(self, *, filters: ScrapeFilters, destination: str | Path):
         super().__init__(filters=filters, destination=destination)
         if self.filters.report_year == YearEnum.any:
             raise ValueError("For Receipts, can't use report_year=Any")
 
 
 def scrape_all(
-    directory: str | Path = "./scraped/",
+    directory: str | Path = DEFAULT_DIRECTORY,
     *,
     headless: bool = True,
 ) -> None:
@@ -227,8 +218,8 @@ def scrape_all(
     ]
     scrapers = [cls(destination=directory / f"{cls.name}.csv") for cls in classes] + [
         IncomeScraper(
-            ScrapeFilters(report_year=year),
-            directory / f"{IncomeScraper.name}_{year.value}.csv",
+            filters=ScrapeFilters(report_year=year),
+            destination=directory / f"{IncomeScraper.name}_{year.value}.csv",
         )
         for year in YearEnum
         if year != YearEnum.any
