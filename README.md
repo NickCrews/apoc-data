@@ -5,7 +5,25 @@ Data from the [Alaska Public Offices Commission](https://aws.state.ak.us/ApocRep
 This scrapes the CSV files from the APOC website once a day and uploads them to
 [this repo's releases](https://github.com/NickCrews/apoc-data/releases).
 
-## Download
+## Manual
+
+Browse from [this repo's releases](https://github.com/NickCrews/apoc-data/releases).
+
+## Python
+
+`pip install apoc-data` and then
+
+```python
+from apoc_data.download import download
+
+download(
+    release="latest",
+    filename="debt.csv",
+    destination="apoc_debt.csv",
+)
+```
+
+## Shell
 
 You can download these CSVs using the direct URLs from the releases page
 using curl, pandas, ibis, whatever!
