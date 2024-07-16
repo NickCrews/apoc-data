@@ -12,7 +12,7 @@ def main():
     parser.add_argument(
         "--directory",
         type=str,
-        default="downloads/",
+        default="scraped/",
         help="The directory to save the data to",
     )
     parser.add_argument(

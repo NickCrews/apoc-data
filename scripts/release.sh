@@ -8,6 +8,6 @@
 # The git tag can't have a colon in it, so we choose a format that is still
 # easily machine parseable and also sortable.
 gh release create "$(date -u '+%Y%m%d-%H%M%S')" \
-    downloads/*.csv \
+    scraped/*.csv \
     --title "$(date -u -Iseconds)" \
     --notes "Data scraped on $(TZ='America/Anchorage' date)"

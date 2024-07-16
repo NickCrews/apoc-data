@@ -27,7 +27,7 @@ jobs:
       - name: Install Chromium for Playwright
         run: pdm run playwright install chromium
       - name: Scrape Data
-        run: pdm run python -m apoc_data.scrape --directory downloads
+        run: pdm run python -m apoc_data.scrape --directory scraped
 
       - name: Release
         env:

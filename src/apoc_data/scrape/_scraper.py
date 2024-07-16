@@ -140,7 +140,7 @@ class _ScraperBase:
     @classmethod
     def default_destination(cls, filters: ScrapeFilters) -> Path:
         return Path(
-            f"./downloads/{cls.name}_{filters.report_year.value}_{filters.status.name}.csv"
+            f"./scraped/{cls.name}_{filters.report_year.value}_{filters.status.name}.csv"
         )
 
 
@@ -193,7 +193,7 @@ class IncomeScraper(_ScraperBase):
 
 
 def scrape_all(
-    directory: str | Path = "./downloads/",
+    directory: str | Path = "./scraped/",
     *,
     headless: bool = True,
 ) -> None:
