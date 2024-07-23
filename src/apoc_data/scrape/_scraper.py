@@ -147,9 +147,9 @@ class _ScraperBase:
 def check_valid_csv(path: Path) -> None:
     """Sometimes APOC gives a runtime error if you try to export too many rows."""
     with open(path) as f:
-        for line in f:
+        for i, line in enumerate(f):
             if "<html>" in line:
-                raise ValueError(f"Runtime Error in {path}")
+                raise ValueError(f"Bad CSV content in line {i} of {path}: {line}")
 
 
 class CandidateRegistrationScraper(_ScraperBase):
