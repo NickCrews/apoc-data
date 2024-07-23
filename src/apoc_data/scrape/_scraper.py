@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterable, ClassVar, Coroutine, Iterable, Protocol
@@ -134,9 +135,13 @@ class _ScraperBase:
         if path.stat().st_size == 0:
             # We end up with an empty file, instead of a CSV with a header row and
             # no data rows. In downstream processing this makes importing data
-            # with *.csv barf. So we simply don't include it.
-            # We could abort the download further upstream if we wanted.
-            _logger.info(f"No results. Not writing to {self.destination}")
+            # with *.csv barf.
+            _logger.info(f"No results. Writing header to {self.destination}")
+            self.destination.parent.mkdir(parents=True, exist_ok=True)
+            content = self._HEADER_ROW
+            if not content.endswith("\n"):
+                content += "\n"
+            self.destination.write_text(content)
         else:
             check_valid_csv(path)
             await download.save_as(self.destination)
@@ -200,21 +205,74 @@ class ExpenditureScraper(_ScraperBase):
     name = "expenditures"
 
 
-class _NotAnyYearScraper(_ScraperBase):
-    """A scraper that can't use report_year=Any
+class _AnyYearMicroBatchScraper(_ScraperBase):
+    """A scraper that downloads report_year=Any in micro-batches.
 
-    If you do this, then you seem to get too many rows of data, and APOC crashes.
+    For some form types, if you try to download all years at once, the APOC
+    server crashes, and you get a "500 Internal Server Error" jammed into
+    the end of a truncated CSV file. This scraper works around that by
+    downloading each year in a separate batch, and then merging the CSVs.
+
     I sent Robert Buchanon from APOC an email about this, he fixed a similar bug for
     me last year. Hopefully soon this will be fixed and we don't need this workaround.
     """
 
-    def __init__(self, *, filters: ScrapeFilters, destination: str | Path):
+    def __init__(
+        self,
+        *,
+        destination: str | Path,
+        filters: ScrapeFilters | None = None,
+        tempdir: Path | None = None,
+    ):
         super().__init__(filters=filters, destination=destination)
-        if self.filters.report_year == YearEnum.any:
-            raise ValueError("For Receipts, can't use report_year=Any")
+        self.tempdir = tempdir
+
+    async def __call__(self, browser_context: BrowserContext) -> None:
+        if self.filters.report_year != YearEnum.any:
+            return await super().__call__(browser_context)
+
+        async def f(tmpdir):
+            tmpdir = Path(tmpdir)
+            sub_scrapers = [
+                self.__class__(
+                    filters=ScrapeFilters(report_year=year, status=self.filters.status),
+                    destination=tmpdir / f"{self.name}_{year.value}.csv",
+                )
+                for year in YearEnum
+                if year != YearEnum.any
+            ]
+            for s in sub_scrapers:
+                await s(browser_context)
+            _merge_csvs([s.destination for s in sub_scrapers], self.destination)
+
+        if self.tempdir is None:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                await f(tmpdir)
+        else:
+            await f(self.tempdir)
 
 
-class IncomeScraper(_NotAnyYearScraper):
+def _merge_csvs(srcs: Iterable[Path], destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with open(destination, "wb") as f:
+        header_written = False
+        i = 1
+        for s in srcs:
+            with open(s, "rb") as subf:
+                first_line = subf.readline()
+                if not header_written:
+                    if not first_line.endswith(b"\n"):
+                        first_line += b"\n"
+                    f.write(first_line)
+                    header_written = True
+                for line in subf:
+                    old_result, rest = line.split(b",", 1)
+                    fixed_result = f"{i},".encode()
+                    f.write(fixed_result + rest)
+                    i += 1
+
+
+class IncomeScraper(_AnyYearMicroBatchScraper):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDIncome.aspx"
     _HEADER_ROW = '''"Result","Date","Transaction Type","Payment Type","Payment Detail","Amount","Last/Business Name","First Name","Address","City","State","Zip","Country","Occupation","Employer","Purpose of Expenditure","--------","Report Type","Election Name","Election Type","Municipality","Office","Filer Type","Name","Report Year","Submitted"'''
     name = "income"
@@ -238,9 +296,10 @@ def scrape_all(
     - letter_of_intent.csv
     - group_registration.csv
     - entity_registration.csv
+    - campaign_form.csv
+    - income.csv
     - expenditure.csv
     - debt.csv
-    - income_{year}.csv for each year where there is data
 
     Parameters
     ----------
@@ -252,6 +311,8 @@ def scrape_all(
     """
     directory = Path(directory)
     classes: list[_ScraperBase] = [
+        CampaignFormScraper,
+        IncomeScraper,
         CandidateRegistrationScraper,
         LetterOfIntentScraper,
         GroupRegistrationScraper,
@@ -259,25 +320,7 @@ def scrape_all(
         DebtScraper,
         ExpenditureScraper,
     ]
-    scrapers = (
-        [cls(destination=directory / f"{cls.name}.csv") for cls in classes]
-        + [
-            IncomeScraper(
-                filters=ScrapeFilters(report_year=year),
-                destination=directory / f"{IncomeScraper.name}_{year.value}.csv",
-            )
-            for year in YearEnum
-            if year != YearEnum.any
-        ]
-        + [
-            CampaignFormScraper(
-                filters=ScrapeFilters(report_year=year),
-                destination=directory / f"{CampaignFormScraper.name}_{year.value}.csv",
-            )
-            for year in YearEnum
-            if year != YearEnum.any
-        ]
-    )
+    scrapers = [cls(destination=directory / f"{cls.name}.csv") for cls in classes]
 
     async def run():
         async with make_browser_async(headless=headless) as browser_context:
