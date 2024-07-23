@@ -58,7 +58,11 @@ async def _run_scrape_flow(page: Page, url: str, filters: ScrapeFilters) -> Down
     await page.wait_for_timeout(100)
     # Wait for either 1. results to come in or 2. the "no results" message to show.
     # Otherwise if we export too early we won't get any data.
-    await expect(page.get_by_text("Press 'Search' to Load Results.")).to_be_hidden()
+    # On some of the search UIs, it can take several seconds for the data to load,
+    # so set a long timeout.
+    await expect(page.get_by_text("Press 'Search' to Load Results.")).to_be_hidden(
+        timeout=30_000
+    )
 
     await page.click("//input[@value='Export']")
     # This has to wait for the server to actually begin the download.
