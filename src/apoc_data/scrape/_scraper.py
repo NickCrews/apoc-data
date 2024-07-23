@@ -126,6 +126,7 @@ class _ScraperBase:
             # We could abort the download further upstream if we wanted.
             _logger.info(f"No results. Not writing to {self.destination}")
         else:
+            check_valid_csv(path)
             await download.save_as(self.destination)
             _logger.info(f"Downloaded {self.destination}")
 
@@ -137,6 +138,14 @@ class _ScraperBase:
     ) -> None:
         """Run the download in the given browser"""
         asyncio.run(run_scrapers([self], browser_context=browser_context))
+
+
+def check_valid_csv(path: Path) -> None:
+    """Sometimes APOC gives a runtime error if you try to export too many rows."""
+    with open(path) as f:
+        for line in f:
+            if "<html>" in line:
+                raise ValueError(f"Runtime Error in {path}")
 
 
 class CandidateRegistrationScraper(_ScraperBase):
