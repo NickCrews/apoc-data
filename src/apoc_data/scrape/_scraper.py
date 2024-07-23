@@ -186,14 +186,28 @@ class ExpenditureScraper(_ScraperBase):
     name = "expenditures"
 
 
-class IncomeScraper(_ScraperBase):
-    _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDIncome.aspx"
-    name = "income"
+class _NotAnyYearScraper(_ScraperBase):
+    """A scraper that can't use report_year=Any
+
+    If you do this, then you seem to get too many rows of data, and APOC crashes.
+    I sent Robert Buchanon from APOC an email about this, he fixed a similar bug for
+    me last year. Hopefully soon this will be fixed and we don't need this workaround.
+    """
 
     def __init__(self, *, filters: ScrapeFilters, destination: str | Path):
         super().__init__(filters=filters, destination=destination)
         if self.filters.report_year == YearEnum.any:
             raise ValueError("For Receipts, can't use report_year=Any")
+
+
+class IncomeScraper(_NotAnyYearScraper):
+    _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDIncome.aspx"
+    name = "income"
+
+
+class CampaignFormScraper(_ScraperBase):
+    _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDForms.aspx"
+    name = "campaign_form"
 
 
 def scrape_all(
@@ -229,14 +243,25 @@ def scrape_all(
         DebtScraper,
         ExpenditureScraper,
     ]
-    scrapers = [cls(destination=directory / f"{cls.name}.csv") for cls in classes] + [
-        IncomeScraper(
-            filters=ScrapeFilters(report_year=year),
-            destination=directory / f"{IncomeScraper.name}_{year.value}.csv",
-        )
-        for year in YearEnum
-        if year != YearEnum.any
-    ]
+    scrapers = (
+        [cls(destination=directory / f"{cls.name}.csv") for cls in classes]
+        + [
+            IncomeScraper(
+                filters=ScrapeFilters(report_year=year),
+                destination=directory / f"{IncomeScraper.name}_{year.value}.csv",
+            )
+            for year in YearEnum
+            if year != YearEnum.any
+        ]
+        + [
+            CampaignFormScraper(
+                filters=ScrapeFilters(report_year=year),
+                destination=directory / f"{CampaignFormScraper.name}_{year.value}.csv",
+            )
+            for year in YearEnum
+            if year != YearEnum.any
+        ]
+    )
 
     async def run():
         async with make_browser_async(headless=headless) as browser_context:
