@@ -77,7 +77,12 @@ async def _run_scrape_flow(page: Page, url: str, filters: ScrapeFilters) -> Down
 
 
 class PScraper(Protocol):
-    def __call__(self, browser_context: BrowserContext) -> None: ...
+    def __call__(self, browser_context: BrowserContext) -> None:
+        """Given a browser context, scrape the data.
+
+        The destination path, the chosen filters, etc all should be known
+        as context, eg as instance variables.
+        """
 
 
 async def run_scrapers(
@@ -100,13 +105,16 @@ async def run_scrapers(
 
 class _ScraperBase:
     _HOME_URL: ClassVar[str]
+    """The URL to start the scrape from."""
+    _HEADER_ROW: ClassVar[str]
+    """The header row for the CSV file. If a download is empty, this will instead be written so that the CSV is still valid."""
     name: ClassVar[str]
 
     def __init__(
         self,
         *,
-        filters: ScrapeFilters | None = None,
         destination: str | Path,
+        filters: ScrapeFilters | None = None,
     ):
         self.destination = Path(destination)
         self.filters = filters or ScrapeFilters()
@@ -154,6 +162,7 @@ def check_valid_csv(path: Path) -> None:
 
 class CandidateRegistrationScraper(_ScraperBase):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/Registration/CandidateRegistration/CRForms.aspx"
+    _HEADER_ROW = '''"Result","Report Year","Display Name","Last Name","First Name","Committee","Purpose","Previously Registered","Address","City","State","Zip","Country","Phone","Fax","Email","Election","Election Type","Municipality","Office","Treasurer Name","Treasurer Email","Treasurer Phone","Chair Name","Chair Email","Chair Phone","Bank Name","Bank Address","Bank City","Bank State","Bank Zip","Bank Country","Submitted","Status","Amending"'''
     name = "candidate_registration"
 
 
@@ -161,21 +170,25 @@ class LetterOfIntentScraper(_ScraperBase):
     _HOME_URL = (
         "https://aws.state.ak.us/ApocReports/Registration/LetterOfIntent/LOIForms.aspx"
     )
+    _HEADER_ROW = '''"Result","Report Year","Display Name","Last Name","First Name","Previously Registered","Phone","Fax","Email","Election","Election Type","Municipality","Office","Submitted","Status","Amending"'''
     name = "letter_of_intent"
 
 
 class GroupRegistrationScraper(_ScraperBase):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/Registration/GroupRegistration/GRForms.aspx"
+    _HEADER_ROW = '''"Result","Report Year","Abbreviation","Name","Address","City","State","Zip","Country","Plan","Type","Subtype","Treasurer Name","Treasurer Email","Chair Name","Chair Email","Additional Emails","Submitted","Status","Amending"'''
     name = "group_registration"
 
 
 class EntityRegistrationScraper(_ScraperBase):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/Registration/EntityRegistration/ERForms.aspx"
+    _HEADER_ROW = '''"Result","Report Year","Abbreviation","Name","Purpose","Supporting State Initiative","Phone","Email","Address","City","State","Zip","Country","Contact Name","Contact Email","Submitted","Status","Amending"'''
     name = "entity_registration"
 
 
 class DebtScraper(_ScraperBase):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDDebt.aspx"
+    _HEADER_ROW = '''"Result","Date","Balance Remaining","Original Amount","Name","Address","City","State","Zip","Country","Description/Purpose","--------","Filer Type","Name","Report Year","Submitted"'''
     name = "debt"
 
 
@@ -183,6 +196,7 @@ class ExpenditureScraper(_ScraperBase):
     _HOME_URL = (
         "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDExpenditures.aspx"
     )
+    _HEADER_ROW = '''"Result","Date","Transaction Type","Payment Type","Payment Detail","Amount","Last/Business Name","First Name","Address","City","State","Zip","Country","Occupation","Employer","Purpose of Expenditure","--------","Report Type","Election Name","Election Type","Municipality","Office","Filer Type","Name","Report Year","Submitted"'''
     name = "expenditures"
 
 
@@ -202,11 +216,13 @@ class _NotAnyYearScraper(_ScraperBase):
 
 class IncomeScraper(_NotAnyYearScraper):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDIncome.aspx"
+    _HEADER_ROW = '''"Result","Date","Transaction Type","Payment Type","Payment Detail","Amount","Last/Business Name","First Name","Address","City","State","Zip","Country","Occupation","Employer","Purpose of Expenditure","--------","Report Type","Election Name","Election Type","Municipality","Office","Filer Type","Name","Report Year","Submitted"'''
     name = "income"
 
 
-class CampaignFormScraper(_ScraperBase):
+class CampaignFormScraper(_AnyYearMicroBatchScraper):
     _HOME_URL = "https://aws.state.ak.us/ApocReports/CampaignDisclosure/CDForms.aspx"
+    _HEADER_ROW = '''"Result","Report Year","Report Type","Begin Date","End Date","Filer Type","Name","Beginning Cash On Hand","Total Income","Previous Campaign Income","Campaign Income Total","Total Expenditures","Previous Campaign Expense","Campaign Expense Total","Closing Cash On Hand","Total Debt","Surplus/Deficit","Submitted","Status","Amending"'''
     name = "campaign_form"
 
 
