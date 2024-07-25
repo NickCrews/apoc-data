@@ -11,6 +11,7 @@ proper steps to get the data.
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
 import tempfile
 from contextlib import asynccontextmanager
@@ -243,7 +244,7 @@ class _AnyYearMicroBatchScraper(_ScraperBase):
             ]
             for s in sub_scrapers:
                 await s(browser_context)
-            _merge_csvs([s.destination for s in sub_scrapers], self.destination)
+            self._merge_csvs([s.destination for s in sub_scrapers], self.destination)
 
         if self.tempdir is None:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -251,25 +252,23 @@ class _AnyYearMicroBatchScraper(_ScraperBase):
         else:
             await f(self.tempdir)
 
-
-def _merge_csvs(srcs: Iterable[Path], destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with open(destination, "wb") as f:
-        header_written = False
-        i = 1
-        for s in srcs:
-            with open(s, "rb") as subf:
-                first_line = subf.readline()
-                if not header_written:
-                    if not first_line.endswith(b"\n"):
-                        first_line += b"\n"
-                    f.write(first_line)
-                    header_written = True
-                for line in subf:
-                    old_result, rest = line.split(b",", 1)
-                    fixed_result = f"{i},".encode()
-                    f.write(fixed_result + rest)
-                    i += 1
+    def _merge_csvs(self, srcs: Iterable[Path], destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with open(destination, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow([col.strip('"') for col in self._HEADER_ROW.split(",")])
+            i = 1
+            for src in srcs:
+                with open(src, "r") as srcf:
+                    reader = csv.reader(srcf)
+                    # skip the header row
+                    next(reader)
+                    for row in reader:
+                        # the first column is an index, but that is only valid per-file
+                        # so when we combine them, we need to renumber them
+                        _index, *rest = row
+                        writer.writerow([i, *rest])
+                        i += 1
 
 
 class IncomeScraper(_AnyYearMicroBatchScraper):
