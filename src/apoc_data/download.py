@@ -9,8 +9,9 @@ curl -s https://raw.githubusercontent.com/NickCrews/apoc-data/main/src/apoc_data
 
 import argparse
 import json
+import os
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 def download(
@@ -56,16 +57,15 @@ def _is_file(destination: Path) -> bool:
 
 def _get_release_info(release: str) -> tuple[str, dict[str, str]]:
     url = f"https://api.github.com/repos/NickCrews/apoc-data/releases/{release}"
-    with urlopen(url) as response:
-        info = json.loads(response.read())
+    info = json.loads(_get(url))
     assets = {asset["name"]: asset["browser_download_url"] for asset in info["assets"]}
     return info["tag_name"], assets
 
 
 def _download_asset(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with urlopen(url) as response, open(destination, "wb") as file:
-        file.write(response.read())
+    with open(destination, "wb") as file:
+        file.write(_get(url))
 
 
 def cli():
@@ -91,6 +91,20 @@ def cli():
     )
     args = parser.parse_args()
     download(release=args.release, filename=args.filename, destination=args.destination)
+
+
+def _get(url: str) -> str:
+    # I'm getting hit by rate limits when using streamlit cloud, I assume because
+    # the IP address is shared. So I'm trying to use a personal access token to
+    # authenticate.
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    try:
+        pat = os.environ["GITHUB_PAT"]
+        headers["Authorization"] = f"toasdasken {pat}"
+    except KeyError:
+        pass
+    with urlopen(Request(url, headers=headers)) as response:
+        return response.read()
 
 
 if __name__ == "__main__":
