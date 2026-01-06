@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APOC Data Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@finos/perspective@2.10.0/dist/cdn/perspective.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@2.10.0/dist/cdn/perspective-viewer.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@2.10.0/dist/cdn/perspective-viewer-datagrid.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@2.10.0/dist/cdn/perspective-viewer-d3fc.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@2.10.0/dist/css/themes.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-content">
+                <h1>APOC Data Explorer</h1>
+                <p class="subtitle">Alaska Public Offices Commission Campaign Finance Data</p>
+
+                <div class="dataset-selector">
+                    <h2>Select Dataset</h2>
+                    <ul class="dataset-list">
+                        <li><button class="dataset-btn" data-dataset="income">Income</button></li>
+                        <li><button class="dataset-btn" data-dataset="expenditures">Expenditures</button></li>
+                        <li><button class="dataset-btn" data-dataset="debt">Debt</button></li>
+                        <li><button class="dataset-btn" data-dataset="campaign_form">Campaign Forms</button></li>
+                        <li><button class="dataset-btn" data-dataset="candidate_registration">Candidate Registration</button></li>
+                        <li><button class="dataset-btn" data-dataset="letter_of_intent">Letter of Intent</button></li>
+                        <li><button class="dataset-btn" data-dataset="group_registration">Group Registration</button></li>
+                        <li><button class="dataset-btn" data-dataset="entity_registration">Entity Registration</button></li>
+                    </ul>
+                </div>
+
+                <div class="status">
+                    <p id="status-text">Select a dataset to begin</p>
+                </div>
+            </div>
+
+            <footer class="sidebar-footer">
+                <p>Data from <a href="https://aws.state.ak.us/ApocReports/Campaign/" target="_blank">APOC</a></p>
+                <p><a href="https://github.com/NickCrews/apoc-data" target="_blank">View on GitHub</a></p>
+                <p><a href="https://github.com/NickCrews/apoc-data/releases" target="_blank">Download Data</a></p>
+            </footer>
+        </aside>
+
+        <!-- Main content -->
+        <main class="main-content">
+            <div id="viewer-container">
+                <perspective-viewer id="viewer"></perspective-viewer>
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
