@@ -26,6 +26,8 @@ class YearEnum(str, Enum):
     _2024 = "2024"
     _2025 = "2025"
     _2026 = "2026"
+    _2027 = "2027"
+    _2028 = "2028"
 
     @classmethod
     def _missing_(cls, value):
