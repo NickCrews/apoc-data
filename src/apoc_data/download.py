@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -52,7 +53,11 @@ def download(
     release, assets = _get_release_info(release=release, tag=tag)
     if filename is not None:
         if filename not in assets:
-            raise ValueError(f"Release {release} does not have a file named {filename}")
+            available = ", ".join(sorted(assets)) or "<no files>"
+            raise ValueError(
+                f"Release {release} does not have a file named {filename}. "
+                f"Available files: {available}"
+            )
         if not _is_file(destination):
             destination = destination / filename
         _download_asset(assets[filename], destination)
@@ -80,9 +85,26 @@ def _get_release_info(
         url = f"https://api.github.com/repos/NickCrews/apoc-data/releases/{release}"
     else:
         url = f"https://api.github.com/repos/NickCrews/apoc-data/releases/tags/{tag}"
-    info = json.loads(_get(url))
+    try:
+        info = json.loads(_get(url))
+    except HTTPError as e:
+        if e.code == 404:
+            requested = release if release is not None else tag
+            raise ValueError(
+                f"No release found for {requested!r}. "
+                f"Available releases: {_available_releases_hint()}"
+            ) from e
+        raise
     assets = {asset["name"]: asset["browser_download_url"] for asset in info["assets"]}
     return info["tag_name"], assets
+
+
+def _available_releases_hint() -> str:
+    try:
+        tags = [r["tag_name"] for r in get_releases()]
+    except Exception:
+        return "<unable to fetch releases>"
+    return ", ".join(["latest", *tags]) or "<no releases>"
 
 
 def _download_asset(url: str, destination: Path) -> None:
