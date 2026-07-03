@@ -103,8 +103,14 @@ class Release:
 
 def release_list() -> list[Release]:
     """List all releases of the APOC data, newest first."""
-    raw = json.loads(_get(f"{_API_ROOT}/releases"))
-    return [Release._from_api(r) for r in raw]
+    releases: list[Release] = []
+    page = 1
+    while True:
+        raw = json.loads(_get(f"{_API_ROOT}/releases?per_page=100&page={page}"))
+        releases.extend(Release._from_api(r) for r in raw)
+        if len(raw) < 100:
+            return releases
+        page += 1
 
 
 def release_get(release: str = "latest") -> Release:
