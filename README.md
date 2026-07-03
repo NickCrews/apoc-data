@@ -66,6 +66,10 @@ There is also a python API. Read the source code.
 
 ---
 
+## License
+
+MIT, do as you wish with the data and code!
+
 ## Dev Notes
 
 Create venv and install dev deps:
