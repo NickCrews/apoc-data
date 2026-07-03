@@ -18,7 +18,14 @@ import sys
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncIterable, ClassVar, Coroutine, Iterable, Protocol
+from typing import (
+    TYPE_CHECKING,
+    AsyncGenerator,
+    ClassVar,
+    Coroutine,
+    Iterable,
+    Protocol,
+)
 
 from playwright.async_api import BrowserContext, async_playwright, expect
 
@@ -47,7 +54,7 @@ def _ensure_chromium_installed(executable_path: str) -> None:
 
 
 @asynccontextmanager
-async def make_browser_async(headless: bool = True) -> AsyncIterable[BrowserContext]:
+async def make_browser_async(headless: bool = True) -> AsyncGenerator[BrowserContext]:
     async with async_playwright() as p:
         _ensure_chromium_installed(p.chromium.executable_path)
         browser = await p.chromium.launch(
@@ -96,7 +103,7 @@ async def _run_scrape_flow(page: Page, url: str, filters: ScrapeFilters) -> Down
 
 
 class PScraper(Protocol):
-    def __call__(self, browser_context: BrowserContext) -> None:
+    async def __call__(self, browser_context: BrowserContext) -> None:
         """Given a browser context, scrape the data.
 
         The destination path, the chosen filters, etc all should be known
@@ -326,7 +333,7 @@ def scrape_all(
         If not provided, a temporary one will be created.
     """
     directory = Path(directory)
-    classes: list[_ScraperBase] = [
+    classes: list[type[_ScraperBase]] = [
         CampaignFormScraper,
         IncomeScraper,
         CandidateRegistrationScraper,
