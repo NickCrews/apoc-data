@@ -10,9 +10,14 @@ requires-python = ">=3.9"
 readme = "README.md"
 license = {text = "MIT"}
 
+[project.optional-dependencies]
+scrape = [
+    "playwright",
+]
+
 [dependency-groups]
 dev = [
-    "playwright",
+    "apoc-data[scrape]",
     "ruff",
 ]
 
