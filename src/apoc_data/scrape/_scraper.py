@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import subprocess
+import sys
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,9 +32,24 @@ _logger = logging.getLogger(__name__)
 DEFAULT_DIRECTORY = "scraped/"
 
 
+def _ensure_chromium_installed(executable_path: str) -> None:
+    """Install the playwright chromium browser if it isn't already.
+
+    This saves users from needing to run `playwright install chromium`
+    manually before their first scrape.
+    """
+    if Path(executable_path).exists():
+        return
+    _logger.info("Chromium not found. Running 'playwright install chromium'...")
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"], check=True
+    )
+
+
 @asynccontextmanager
 async def make_browser_async(headless: bool = True) -> AsyncIterable[BrowserContext]:
     async with async_playwright() as p:
+        _ensure_chromium_installed(p.chromium.executable_path)
         browser = await p.chromium.launch(
             headless=headless,
             # This sometimes avoids race conditions?

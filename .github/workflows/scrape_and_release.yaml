@@ -20,10 +20,6 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - name: Create dev environment
-        run: uv sync
-      - name: Install Chromium for Playwright
-        run: uv run playwright install chromium
       - name: Scrape Data
         run: uv run python -m apoc_data.scrape --directory scraped
 

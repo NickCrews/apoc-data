@@ -41,9 +41,10 @@ curl -s https://raw.githubusercontent.com/NickCrews/apoc-data/main/src/apoc_data
 
 ## Dev Notes
 
+Create venv and install dev deps:
+
 ```shell
 uv sync
-uv run playwright install chromium
 ```
 
 scrape:
