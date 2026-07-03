@@ -42,8 +42,8 @@ curl -s https://raw.githubusercontent.com/NickCrews/apoc-data/main/src/apoc_data
 ## Dev Notes
 
 ```shell
-pdm install
-playwright install chromium
+uv sync
+uv run playwright install chromium
 ```
 
 scrape:

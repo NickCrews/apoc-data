@@ -10,15 +10,12 @@ requires-python = ">=3.9"
 readme = "README.md"
 license = {text = "MIT"}
 
-[tool.pdm.dev-dependencies]  # This is dev dependencies
+[dependency-groups]
 dev = [
     "playwright",
     "ruff",
 ]
 
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
-
-[tool.pdm]
-distribution = true
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
