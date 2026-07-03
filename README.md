@@ -20,8 +20,11 @@ Browse from [this repo's releases](https://github.com/NickCrews/apoc-data/releas
 Using [uv](https://docs.astral.sh/uv/)'s `uvx`:
 
 ```shell
-uvx apoc-data download # downloads all files from the latest release to ./downloads/ folder
-uvx apoc-data download --release "20260702-125614" --destination mydownloads/ # specify explicitly
+uvx apoc-data release download # downloads all files from the latest release to ./downloads/ folder
+uvx apoc-data release download "20260702-125614" --destination mydownloads/ # specify explicitly
+uvx apoc-data asset download debt.csv --destination apoc_debt.csv # download a single file
+uvx apoc-data release list # see what releases are available
+uvx apoc-data asset list --json # see what files are in the latest release, as JSON
 ```
 
 Or, you can download these CSVs directly using the direct URLs from the releases page
@@ -41,9 +44,11 @@ duckdb -c "SELECT count(*) FROM 'https://github.com/NickCrews/apoc-data/releases
 We provide a python API too. `uv add apoc-data` and then
 
 ```python
-from apoc_data.releases import download
+from apoc_data.releases import asset_download, release_download, release_list
 
-download(release="latest", filename="debt.csv", destination="apoc_debt.csv")
+release_list()  # all releases, newest first, as `Release` objects
+release_download(destination="downloads/")  # all files from the latest release
+asset_download("debt.csv", destination="apoc_debt.csv")  # a single file
 ```
 
 ---

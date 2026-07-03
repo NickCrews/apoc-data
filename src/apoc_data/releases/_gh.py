@@ -1,110 +1,202 @@
-"""Download CSV(s) of APOC data from https://github.com/NickCrews/apoc-data/releases."""
+"""Access the APOC data published at https://github.com/NickCrews/apoc-data/releases."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+_REPO = "NickCrews/apoc-data"
+_API_ROOT = f"https://api.github.com/repos/{_REPO}"
 
-def download(
-    *,
-    release: str | None = None,
-    tag: str | None = None,
-    filename: str | None = None,
-    destination: str | Path = "downloads/",
-) -> None:
-    """Download CSV(s) of APOC data from https://github.com/NickCrews/apoc-data/releases.
+
+@dataclasses.dataclass(frozen=True)
+class Asset:
+    """A single downloadable file in a release."""
+
+    name: str
+    """The filename, e.g. ``candidate_registration.csv``."""
+    url: str
+    """The direct download URL."""
+    size: int
+    """The size in bytes."""
+    updated_at: datetime
+    """When the asset was last updated."""
+
+    @classmethod
+    def _from_api(cls, raw: dict[str, Any]) -> Asset:
+        return cls(
+            name=raw["name"],
+            url=raw["browser_download_url"],
+            size=raw["size"],
+            updated_at=_parse_timestamp(raw["updated_at"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dict."""
+        return {
+            "name": self.name,
+            "url": self.url,
+            "size": self.size,
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    def download(self, destination: str | Path) -> Path:
+        """Download this asset to the given file path and return it."""
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(_get(self.url))
+        return destination
+
+
+@dataclasses.dataclass(frozen=True)
+class Release:
+    """A release of the APOC data on GitHub."""
+
+    tag: str
+    """The git tag, e.g. ``20240716-025636``."""
+    name: str
+    """The human-readable release title."""
+    url: str
+    """The web page for the release."""
+    published_at: datetime
+    """When the release was published."""
+    assets: tuple[Asset, ...]
+    """The downloadable files in this release."""
+
+    @classmethod
+    def _from_api(cls, raw: dict[str, Any]) -> Release:
+        return cls(
+            tag=raw["tag_name"],
+            name=raw["name"] or raw["tag_name"],
+            url=raw["html_url"],
+            published_at=_parse_timestamp(raw["published_at"]),
+            assets=tuple(Asset._from_api(a) for a in raw["assets"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dict."""
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "url": self.url,
+            "published_at": self.published_at.isoformat(),
+            "assets": [a.to_dict() for a in self.assets],
+        }
+
+    def asset(self, filename: str) -> Asset:
+        """Get the asset with the given filename, or raise ValueError."""
+        for asset in self.assets:
+            if asset.name == filename:
+                return asset
+        available = ", ".join(sorted(a.name for a in self.assets)) or "<no files>"
+        raise ValueError(
+            f"Release {self.tag} does not have a file named {filename}. "
+            f"Available files: {available}"
+        )
+
+
+def release_list() -> list[Release]:
+    """List all releases of the APOC data, newest first."""
+    raw = json.loads(_get(f"{_API_ROOT}/releases"))
+    return [Release._from_api(r) for r in raw]
+
+
+def release_get(release: str = "latest") -> Release:
+    """Get a single release by tag, or the latest release.
 
     Parameters
     ----------
     release :
-        The name of the release to download.
-        Default is None, which means latest release.
-        You can also provide a tag instead of a release.
-    tag :
-        The name of the release to download.
-        Default is None, which means latest release.
-        You can also provide a release instead of a tag.
-    filename :
-        The name of the file to download.
-        Default is None, which downloads all files.
-    destination :
-        Where to save the file(s).
-        If this looks like a file (the final path segment contains a `.`),
-        then we can only download a single file, and it will be saved to that location.
-        Otherwise, the file(s) will be saved underneath there.
+        A tag such as ``20240716-025636``, or ``latest`` for the most recent release.
     """
-    if release is not None and tag is not None:
-        raise ValueError("Can't provide both release and tag")
-    if release is None and tag is None:
-        release = "latest"
-
-    destination = Path(destination)
-    release, assets = _get_release_info(release=release, tag=tag)
-    if filename is not None:
-        if filename not in assets:
-            available = ", ".join(sorted(assets)) or "<no files>"
-            raise ValueError(
-                f"Release {release} does not have a file named {filename}. "
-                f"Available files: {available}"
-            )
-        if not _is_file(destination):
-            destination = destination / filename
-        _download_asset(assets[filename], destination)
+    if release == "latest":
+        url = f"{_API_ROOT}/releases/latest"
     else:
-        if _is_file(destination):
-            raise ValueError("Can't download all files to a single file")
-        for name, url in assets.items():
-            _download_asset(url, destination / name)
-
-
-def get_releases() -> list[dict[str, Any]]:
-    """Get information about all releases of the APOC data."""
-    url = "https://api.github.com/repos/NickCrews/apoc-data/releases"
-    return json.loads(_get(url))
-
-
-def _is_file(destination: Path) -> bool:
-    return "." in destination.name
-
-
-def _get_release_info(
-    *, release: str | None = None, tag: str | None = None
-) -> tuple[str, dict[str, str]]:
-    if release is not None:
-        url = f"https://api.github.com/repos/NickCrews/apoc-data/releases/{release}"
-    else:
-        url = f"https://api.github.com/repos/NickCrews/apoc-data/releases/tags/{tag}"
+        url = f"{_API_ROOT}/releases/tags/{release}"
     try:
-        info = json.loads(_get(url))
+        raw = json.loads(_get(url))
     except HTTPError as e:
         if e.code == 404:
-            requested = release if release is not None else tag
             raise ValueError(
-                f"No release found for {requested!r}. "
+                f"No release found for {release!r}. "
                 f"Available releases: {_available_releases_hint()}"
             ) from e
         raise
-    assets = {asset["name"]: asset["browser_download_url"] for asset in info["assets"]}
-    return info["tag_name"], assets
+    return Release._from_api(raw)
+
+
+def asset_list(release: str = "latest") -> list[Asset]:
+    """List the downloadable files in a release.
+
+    Parameters
+    ----------
+    release :
+        A tag such as ``20240716-025636``, or ``latest`` for the most recent release.
+    """
+    return list(release_get(release).assets)
+
+
+def release_download(
+    release: str = "latest",
+    *,
+    destination: str | Path = "downloads/",
+) -> list[Path]:
+    """Download all files in a release to a folder and return the downloaded paths.
+
+    Parameters
+    ----------
+    release :
+        A tag such as ``20240716-025636``, or ``latest`` for the most recent release.
+    destination :
+        The folder to save the files under.
+    """
+    destination = Path(destination)
+    rel = release_get(release)
+    return [asset.download(destination / asset.name) for asset in rel.assets]
+
+
+def asset_download(
+    filename: str,
+    *,
+    release: str = "latest",
+    destination: str | Path | None = None,
+) -> Path:
+    """Download a single file from a release and return the downloaded path.
+
+    Parameters
+    ----------
+    filename :
+        The name of the file to download, e.g. ``debt.csv``.
+    release :
+        A tag such as ``20240716-025636``, or ``latest`` for the most recent release.
+    destination :
+        The file path to save to.
+        Default is None, which saves to ``filename`` in the current directory.
+    """
+    asset = release_get(release).asset(filename)
+    if destination is None:
+        destination = Path(asset.name)
+    return asset.download(destination)
 
 
 def _available_releases_hint() -> str:
     try:
-        tags = [r["tag_name"] for r in get_releases()]
+        tags = [r.tag for r in release_list()]
     except Exception:
         return "<unable to fetch releases>"
     return ", ".join(["latest", *tags]) or "<no releases>"
 
 
-def _download_asset(url: str, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with open(destination, "wb") as file:
-        file.write(_get(url))
+def _parse_timestamp(raw: str) -> datetime:
+    # GitHub timestamps look like "2024-07-16T02:56:36Z".
+    # datetime.fromisoformat can't parse the trailing "Z" until python 3.11.
+    return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def _get(url: str) -> bytes:
