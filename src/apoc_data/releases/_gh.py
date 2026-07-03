@@ -1,13 +1,7 @@
-"""Download CSV(s) of APOC data from https://github.com/NickCrews/apoc-data/releases
+"""Download CSV(s) of APOC data from https://github.com/NickCrews/apoc-data/releases."""
 
-A no-install way to use this script is to download it from github and pipe to curl:
+from __future__ import annotations
 
-```shell
-curl -s https://raw.githubusercontent.com/NickCrews/apoc-data/main/src/apoc_data/download.py | python - --release latest
-```
-"""
-
-import argparse
 import json
 import os
 from pathlib import Path
@@ -113,44 +107,15 @@ def _download_asset(url: str, destination: Path) -> None:
         file.write(_get(url))
 
 
-def cli():
-    parser = argparse.ArgumentParser(
-        description="Download data from the Alaska Public Offices Commission"
-    )
-    parser.add_argument(
-        "--release",
-        type=str,
-        default="latest",
-        help="The name of the release to download",
-    )
-    parser.add_argument(
-        "--filename",
-        type=str,
-        help="The name of the file to download",
-    )
-    parser.add_argument(
-        "--destination",
-        type=str,
-        default="downloads/",
-        help="Where to save the file(s)",
-    )
-    args = parser.parse_args()
-    download(release=args.release, filename=args.filename, destination=args.destination)
-
-
-def _get(url: str) -> str:
+def _get(url: str) -> bytes:
     # I'm getting hit by rate limits when using streamlit cloud, I assume because
     # the IP address is shared. So I'm trying to use a personal access token to
     # authenticate.
     headers = {"Accept": "application/vnd.github.v3+json"}
     try:
         pat = os.environ["GITHUB_PAT"]
-        headers["Authorization"] = f"toasdasken {pat}"
+        headers["Authorization"] = f"token {pat}"
     except KeyError:
         pass
     with urlopen(Request(url, headers=headers)) as response:
         return response.read()
-
-
-if __name__ == "__main__":
-    cli()

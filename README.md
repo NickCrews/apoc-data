@@ -1,43 +1,65 @@
 # APOC Data
 
-Data from the [Alaska Public Offices Commission](https://aws.state.ak.us/ApocReports/Campaign/).
+Alaska campaign financial disclosure data from the [Alaska Public Offices Commission](https://aws.state.ak.us/ApocReports/Campaign/).
 
 This scrapes the CSV files from the APOC website once a day and uploads them to
 [this repo's releases](https://github.com/NickCrews/apoc-data/releases).
 
-## Manual
+---
+
+## Download a Recent Scrape
+
+You can download the daily-scraped CSVs from the GitHub releases (this is what most users want).
+
+### From the Web Interface
 
 Browse from [this repo's releases](https://github.com/NickCrews/apoc-data/releases).
 
-## Python
+### From the CLI
 
-`pip install apoc-data` and then
+Using [uv](https://docs.astral.sh/uv/)'s `uvx`:
 
-```python
-from apoc_data.download import download
-
-download(
-    release="latest",
-    filename="debt.csv",
-    destination="apoc_debt.csv",
-)
+```shell
+uvx apoc-data download # downloads all files from the latest release to ./downloads/ folder
+uvx apoc-data download --release "20260702-125614" --destination mydownloads/ # specify explicitly
 ```
 
-## Shell
-
-You can download these CSVs using the direct URLs from the releases page
+Or, you can download these CSVs directly using the direct URLs from the releases page
 using curl, pandas, ibis, whatever!
 
 ```bash
-curl -L https://github.com/NickCrews/apoc-data/releases/download/20240716-025636/candidate_registration.csv > candidate_registration.csv
+curl -L https://github.com/NickCrews/apoc-data/releases/latest/download/candidate_registration.csv > candidate_registration.csv # get latest
+curl -L https://github.com/NickCrews/apoc-data/releases/download/20240716-025636/candidate_registration.csv > candidate_registration.csv # or a different url pattern for specific releases
+
+# query directly using duckdb
+duckdb -c "SELECT count(*) FROM 'https://github.com/NickCrews/apoc-data/releases/latest/download/candidate_registration.csv'"
+duckdb -c "SELECT count(*) FROM 'https://github.com/NickCrews/apoc-data/releases/download/20240716-025636/candidate_registration.csv'"
 ```
 
-or we have a tiny python script that makes this a little nicer, eg get the latest
-release, choose the download directory, etc. Read the script for more info.
+### From python
 
-```bash
-curl -s https://raw.githubusercontent.com/NickCrews/apoc-data/main/src/apoc_data/download.py | python - --release latest
+We provide a python API too. `uv add apoc-data` and then
+
+```python
+from apoc_data.releases import download
+
+download(release="latest", filename="debt.csv", destination="apoc_debt.csv")
 ```
+
+---
+
+## Scrape Yourself
+
+You can also scrape fresh data directly from the APOC website
+(requires the `scrape` extra for playwright):
+
+```shell
+uvx "apoc-data[scrape]" scrape --directory scraped/
+```
+
+There is also a python API. Read the source code.
+
+---
 
 ## Dev Notes
 
@@ -50,5 +72,5 @@ uv sync
 scrape:
 
 ```shell
-python -m apoc_data.scrape --directory downloads --no-headless
+uv run apoc-data scrape --directory downloads --no-headless
 ```

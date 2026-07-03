@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Scrape Data
-        run: uv run python -m apoc_data.scrape --directory scraped
+        run: uv run apoc-data scrape --directory scraped
 
       - name: Release
         env:
