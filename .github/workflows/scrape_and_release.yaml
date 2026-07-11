@@ -8,10 +8,24 @@ on:
     - cron: "47 10 * * *"
   workflow_dispatch:
 
+# Needed for creating releases (contents) and deploying to GitHub Pages.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Allow only one concurrent Pages deployment.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   scrape_and_release:
     name: Run and Upload
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -27,3 +41,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/release.sh
+
+      # Publish just the latest scrape to GitHub Pages.
+      - name: Build Pages index
+        run: scripts/make_pages_index.sh scraped
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: scraped
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
