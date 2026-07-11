@@ -14,6 +14,7 @@ You can download the daily-scraped CSVs from the GitHub releases (this is what m
 ### From the Web Interface
 
 Browse from [this repo's releases](https://github.com/NickCrews/apoc-data/releases).
+Or the latest release is also hosted at https://nickcrews.github.io/apoc-data.
 
 ### From the CLI
 
@@ -38,6 +39,14 @@ curl -L https://github.com/NickCrews/apoc-data/releases/download/20240716-025636
 duckdb -c "SELECT count(*) FROM 'https://github.com/NickCrews/apoc-data/releases/latest/download/candidate_registration.csv'"
 duckdb -c "SELECT count(*) FROM 'https://github.com/NickCrews/apoc-data/releases/download/20240716-025636/candidate_registration.csv'"
 ```
+
+Note that the GitHub release URLs above don't send CORS headers, so they can't be
+fetched directly from a browser (eg from duckdb-wasm or a web app). For that use case,
+the latest release is also mirrored to GitHub Pages, which *does* allow cross-origin
+requests. eg at https://shell.duckdb.org/:
+
+- this works:    `SELECT count(*) FROM 'https://nickcrews.github.io/apoc-data/campaign_form.csv'`
+- this does not: `SELECT count(*) FROM 'https://github.com/NickCrews/apoc-data/releases/latest/download/campaign_form.csv'`
 
 ### From python
 
