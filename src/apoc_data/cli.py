@@ -134,7 +134,11 @@ def _run_asset_download(args: argparse.Namespace) -> None:
 def _run_scrape(args: argparse.Namespace) -> None:
     try:
         from apoc_data.scrape import scrape_all
-        from apoc_data.scrape._scraper import DEFAULT_DIRECTORY
+        from apoc_data.scrape._scraper import (
+            DEFAULT_ATTEMPTS,
+            DEFAULT_DIRECTORY,
+            DEFAULT_RETRY_BACKOFF,
+        )
     except ImportError as e:
         raise SystemExit(
             "The scrape command requires extra dependencies. "
@@ -147,7 +151,14 @@ def _run_scrape(args: argparse.Namespace) -> None:
     if directory.is_file():
         raise ValueError("The directory can't be a file")
     logging.basicConfig(level=logging.INFO)
-    scrape_all(directory, headless=args.headless)
+    scrape_all(
+        directory,
+        headless=args.headless,
+        attempts=DEFAULT_ATTEMPTS if args.attempts is None else args.attempts,
+        retry_backoff=(
+            DEFAULT_RETRY_BACKOFF if args.retry_backoff is None else args.retry_backoff
+        ),
+    )
 
 
 def _run_convert(args: argparse.Namespace) -> None:
@@ -266,6 +277,21 @@ def main(argv: list[str] | None = None) -> None:
         default=True,
         action=argparse.BooleanOptionalAction,
         help="Run the browser in headless mode",
+    )
+    scrape_parser.add_argument(
+        "--attempts",
+        type=int,
+        default=None,
+        help=(
+            "How many times to try each individual scrape before giving up. "
+            "The APOC server is intermittently slow (default: 4)"
+        ),
+    )
+    scrape_parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=None,
+        help="Base seconds for exponential backoff between retries (default: 5)",
     )
     scrape_parser.set_defaults(func=_run_scrape)
 

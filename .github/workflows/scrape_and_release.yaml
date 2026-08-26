@@ -23,6 +23,9 @@ jobs:
   scrape_and_release:
     name: Run and Upload
     runs-on: ubuntu-latest
+    # A healthy run takes ~30 min. Retries widen that, but we still want a
+    # wedged run to fail in a bounded time rather than burn the 6h default.
+    timeout-minutes: 120
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

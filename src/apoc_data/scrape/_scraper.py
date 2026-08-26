@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import random
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     AsyncGenerator,
+    Awaitable,
+    Callable,
     ClassVar,
     Coroutine,
     Iterable,
@@ -28,6 +32,7 @@ from typing import (
 )
 
 from playwright.async_api import BrowserContext, async_playwright, expect
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from ._filters import ScrapeFilters, YearEnum
 
@@ -37,6 +42,68 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 DEFAULT_DIRECTORY = "scraped/"
+
+DEFAULT_ATTEMPTS = 4
+"""How many times to try a single scrape before giving up.
+
+The APOC server is intermittently slow, and a full run makes ~48 scrapes,
+so without retries a single hiccup fails the whole run.
+"""
+DEFAULT_RETRY_BACKOFF = 5.0
+"""Base number of seconds for exponential backoff between retries."""
+
+_ACTION_TIMEOUT = 60_000
+"""Default timeout for ordinary page actions (clicks, select_option, ...).
+
+Playwright's own default is 30s, which we've seen the server blow past.
+"""
+_SEARCH_TIMEOUT = 60_000
+"""How long to wait for search results to replace the "Press 'Search'" message."""
+_DOWNLOAD_TIMEOUT = 300_000
+"""How long to wait for the server to *begin* sending the export.
+
+Successful runs have been observed taking ~90s, so the old 120s was cutting
+it very close whenever the server was under load.
+"""
+
+_RETRYABLE = (
+    # Any of the waits in _run_scrape_flow blowing their timeout.
+    PlaywrightTimeoutError,
+    # `expect(...).to_be_hidden()` raises AssertionError, not TimeoutError.
+    AssertionError,
+    # check_valid_csv: APOC jams a 500 error into the CSV when it's overloaded.
+    ValueError,
+)
+"""Exceptions that indicate a flaky server rather than a broken scraper."""
+
+
+async def _retrying(
+    make_coro: Callable[[], Awaitable[Any]],
+    *,
+    what: str,
+    attempts: int = DEFAULT_ATTEMPTS,
+    backoff: float = DEFAULT_RETRY_BACKOFF,
+) -> Any:
+    """Await `make_coro()`, retrying with exponential backoff + jitter.
+
+    `make_coro` is a zero-arg callable (not a coroutine) because a coroutine
+    can only be awaited once; we need a fresh one per attempt.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return await make_coro()
+        except _RETRYABLE as e:
+            if attempt == attempts:
+                _logger.error(f"{what}: failed after {attempts} attempts")
+                raise
+            # Jitter so that a whole run doesn't retry in lockstep.
+            delay = backoff * 2 ** (attempt - 1) + random.uniform(0, backoff)
+            _logger.warning(
+                f"{what}: attempt {attempt}/{attempts} failed "
+                f"({type(e).__name__}: {str(e).splitlines()[0]}). "
+                f"Retrying in {delay:.1f}s"
+            )
+            await asyncio.sleep(delay)
 
 
 def _ensure_chromium_installed(executable_path: str) -> None:
@@ -68,7 +135,10 @@ async def make_browser_async(headless: bool = True) -> AsyncGenerator[BrowserCon
 
 
 async def _run_scrape_flow(page: Page, url: str, filters: ScrapeFilters) -> Download:
-    # unconditionally reload the page to clear out any old state
+    # unconditionally reload the page to clear out any old state.
+    # This is what makes the flow safe to retry: a previous attempt may have
+    # died with the Export modal still open, and this resets that.
+    page.set_default_timeout(_ACTION_TIMEOUT)
     await page.goto(url)
 
     # after page load it takes a bit for the dropdowns to be ready?
@@ -87,14 +157,14 @@ async def _run_scrape_flow(page: Page, url: str, filters: ScrapeFilters) -> Down
     # On some of the search UIs, it can take several seconds for the data to load,
     # so set a long timeout.
     await expect(page.get_by_text("Press 'Search' to Load Results.")).to_be_hidden(
-        timeout=30_000
+        timeout=_SEARCH_TIMEOUT
     )
 
     await page.click("//input[@value='Export']")
     # This has to wait for the server to actually begin the download.
     # When it is really busy, this can take a long time.
     # So we make this timeout quite large.
-    async with page.expect_download(timeout=120_000) as download_info:
+    async with page.expect_download(timeout=_DOWNLOAD_TIMEOUT) as download_info:
         # The first link with text ".CSV" below the text "Export All Pages:"
         await page.click("a:text('.CSV'):below(:text('Export All Pages:'))")
 
@@ -141,9 +211,13 @@ class _ScraperBase:
         *,
         destination: str | Path,
         filters: ScrapeFilters | None = None,
+        attempts: int = DEFAULT_ATTEMPTS,
+        retry_backoff: float = DEFAULT_RETRY_BACKOFF,
     ):
         self.destination = Path(destination)
         self.filters = filters or ScrapeFilters()
+        self.attempts = attempts
+        self.retry_backoff = retry_backoff
 
     async def __call__(self, browser_context: BrowserContext) -> None:
         page = (
@@ -154,6 +228,19 @@ class _ScraperBase:
         _logger.info(
             f"Downloading {self.name} to {self.destination} using {self.filters}"
         )
+        # The APOC server is intermittently slow: any of the waits inside
+        # _run_scrape_flow can blow its timeout. Retry the whole flow, which
+        # starts by reloading the page and so recovers from a half-finished
+        # previous attempt.
+        await _retrying(
+            lambda: self._scrape_once(page),
+            what=f"{self.name} (report_year={self.filters.report_year.value})",
+            attempts=self.attempts,
+            backoff=self.retry_backoff,
+        )
+
+    async def _scrape_once(self, page: Page) -> None:
+        """One attempt at scraping + saving. Safe to call repeatedly."""
         download = await _run_scrape_flow(page, self._HOME_URL, self.filters)
         _logger.info("Download started")
         path = await download.path()
@@ -248,8 +335,15 @@ class _AnyYearMicroBatchScraper(_ScraperBase):
         destination: str | Path,
         filters: ScrapeFilters | None = None,
         tempdir: Path | None = None,
+        attempts: int = DEFAULT_ATTEMPTS,
+        retry_backoff: float = DEFAULT_RETRY_BACKOFF,
     ):
-        super().__init__(filters=filters, destination=destination)
+        super().__init__(
+            filters=filters,
+            destination=destination,
+            attempts=attempts,
+            retry_backoff=retry_backoff,
+        )
         self.tempdir = tempdir
 
     async def __call__(self, browser_context: BrowserContext) -> None:
@@ -262,6 +356,8 @@ class _AnyYearMicroBatchScraper(_ScraperBase):
                 self.__class__(
                     filters=ScrapeFilters(report_year=year, status=self.filters.status),
                     destination=tmpdir / f"{self.name}_{year.value}.csv",
+                    attempts=self.attempts,
+                    retry_backoff=self.retry_backoff,
                 )
                 for year in YearEnum
                 if year != YearEnum.any
@@ -311,6 +407,8 @@ def scrape_all(
     directory: str | Path = DEFAULT_DIRECTORY,
     *,
     headless: bool = True,
+    attempts: int = DEFAULT_ATTEMPTS,
+    retry_backoff: float = DEFAULT_RETRY_BACKOFF,
 ) -> None:
     """Scrape .CSVs from https://aws.state.ak.us/ApocReports/Campaign/
 
@@ -331,6 +429,10 @@ def scrape_all(
     browser_context : BrowserContext, optional
         A browser context to use for downloading.
         If not provided, a temporary one will be created.
+    attempts : int
+        How many times to try each individual scrape before giving up.
+    retry_backoff : float
+        Base seconds for the exponential backoff between retries.
     """
     directory = Path(directory)
     classes: list[type[_ScraperBase]] = [
@@ -343,7 +445,14 @@ def scrape_all(
         DebtScraper,
         ExpenditureScraper,
     ]
-    scrapers = [cls(destination=directory / f"{cls.name}.csv") for cls in classes]
+    scrapers = [
+        cls(
+            destination=directory / f"{cls.name}.csv",
+            attempts=attempts,
+            retry_backoff=retry_backoff,
+        )
+        for cls in classes
+    ]
 
     async def run():
         async with make_browser_async(headless=headless) as browser_context:
