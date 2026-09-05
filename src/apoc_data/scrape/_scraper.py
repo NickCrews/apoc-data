@@ -57,7 +57,7 @@ _ACTION_TIMEOUT = 60_000
 
 Playwright's own default is 30s, which we've seen the server blow past.
 """
-_SEARCH_TIMEOUT = 60_000
+_SEARCH_TIMEOUT = 180_000
 """How long to wait for search results to replace the "Press 'Search'" message."""
 _DOWNLOAD_TIMEOUT = 300_000
 """How long to wait for the server to *begin* sending the export.
