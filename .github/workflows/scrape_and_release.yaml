@@ -34,6 +34,15 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - name: Install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
       - name: Scrape Data
         run: uv run apoc-data scrape --directory scraped
 
@@ -42,15 +51,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/release.sh
 
-      # Publish just the latest scrape to GitHub Pages.
-      - name: Build Pages index
-        run: scripts/make_pages_index.sh scraped
+      # Publish the explorer app plus the latest scrape (CSV and parquet)
+      # to GitHub Pages.
+      - name: Build the Pages site
+        run: scripts/build_site.sh scraped _site
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: scraped
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

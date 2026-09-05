@@ -7,6 +7,8 @@ Subcommands:
 - ``asset list|download``: inspect and fetch individual files within a release.
 - ``scrape``: scrape the data from the APOC website using playwright
   (requires installing the ``scrape`` extra, e.g. ``apoc-data[scrape]``).
+- ``convert``: convert the scraped CSVs to typed parquet files
+  (requires installing the ``convert`` extra, e.g. ``apoc-data[convert]``).
 
 Usage:
 
@@ -16,6 +18,7 @@ uvx apoc-data release list --json
 uvx apoc-data asset list --release 20240716-025636
 uvx apoc-data asset download debt.csv --destination apoc_debt.csv
 uvx "apoc-data[scrape]" scrape --directory scraped/
+uvx "apoc-data[convert]" convert --source scraped/ --destination _site/data/
 ```
 """
 
@@ -26,6 +29,7 @@ import json
 import logging
 from pathlib import Path
 
+from apoc_data.convert import DEFAULT_DESTINATION, DEFAULT_SOURCE
 from apoc_data.releases import (
     Asset,
     Release,
@@ -146,6 +150,18 @@ def _run_scrape(args: argparse.Namespace) -> None:
     scrape_all(directory, headless=args.headless)
 
 
+def _run_convert(args: argparse.Namespace) -> None:
+    from apoc_data.convert import convert_all
+
+    logging.basicConfig(level=logging.INFO)
+    paths = convert_all(source=args.source, destination=args.destination)
+    if args.json:
+        print(json.dumps([str(p) for p in paths], indent=2))
+    else:
+        for path in paths:
+            print(f"{path} ({_human_size(path.stat().st_size)})")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="apoc-data",
@@ -252,6 +268,26 @@ def main(argv: list[str] | None = None) -> None:
         help="Run the browser in headless mode",
     )
     scrape_parser.set_defaults(func=_run_scrape)
+
+    convert_parser = subparsers.add_parser(
+        "convert",
+        help='Convert the scraped CSVs to typed parquet (requires the "convert" extra)',
+        description="Convert the untyped APOC CSVs into typed, much smaller parquet files",
+    )
+    convert_parser.add_argument(
+        "--source",
+        type=str,
+        default=DEFAULT_SOURCE,
+        help=f"The directory of CSVs to convert (default: {DEFAULT_SOURCE})",
+    )
+    convert_parser.add_argument(
+        "--destination",
+        type=str,
+        default=DEFAULT_DESTINATION,
+        help=f"The directory to write parquet files to (default: {DEFAULT_DESTINATION})",
+    )
+    _add_json_flag(convert_parser)
+    convert_parser.set_defaults(func=_run_convert)
 
     args = parser.parse_args(argv)
     args.func(args)

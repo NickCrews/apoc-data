@@ -1,0 +1,40 @@
+{
+  "name": "apoc-data-explorer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "data": "cd .. && uv run apoc-data convert --source scraped --destination web/public/data"
+  },
+  "overrides": {
+    "@duckdb/duckdb-wasm": "1.32.0",
+    "react": "$react",
+    "react-dom": "$react-dom"
+  },
+  "dependencies": {
+    "@sqlrooms/duckdb": "0.28.0",
+    "@sqlrooms/mosaic": "0.28.0",
+    "@sqlrooms/room-shell": "0.28.0",
+    "@sqlrooms/sql-editor": "0.28.0",
+    "@sqlrooms/ui": "0.28.0",
+    "@uwdata/mosaic-core": "^0.21.1",
+    "@uwdata/mosaic-spec": "^0.21.1",
+    "lucide-react": "^0.555.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "tailwindcss": "^4.1.18",
+    "typescript": "5.9.2",
+    "vite": "^8.0.5"
+  }
+}

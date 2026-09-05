@@ -17,10 +17,14 @@ apoc-data = "apoc_data.cli:main"
 scrape = [
     "playwright",
 ]
+convert = [
+    "duckdb",
+]
 
 [dependency-groups]
 dev = [
     "apoc-data[scrape]",
+    "apoc-data[convert]",
     "ruff",
 ]
 
