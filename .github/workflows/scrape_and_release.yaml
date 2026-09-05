@@ -8,44 +8,25 @@ on:
     - cron: "47 10 * * *"
   workflow_dispatch:
 
-# Needed for creating releases (contents) and deploying to GitHub Pages.
+# Needed for creating releases.
 permissions:
   contents: write
-  pages: write
-  id-token: write
-
-# Allow only one concurrent Pages deployment.
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
 
 jobs:
   scrape_and_release:
-    name: Run and Upload
+    name: Scrape and Upload Release
     runs-on: ubuntu-latest
     # A healthy run takes ~30 min. Retries widen that, but we still want a
     # wedged run to fail in a bounded time rather than burn the 6h default.
     timeout-minutes: 120
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
           enable-cache: true
-      - name: Install node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install web dependencies
-        run: npm ci
-        working-directory: web
       - name: Scrape Data
         run: uv run apoc-data scrape --directory scraped
 
@@ -53,17 +34,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/release.sh
-
-      # Publish the explorer app plus the latest scrape (CSV and parquet)
-      # to GitHub Pages.
-      - name: Build the Pages site
-        run: scripts/build_site.sh scraped _site
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
