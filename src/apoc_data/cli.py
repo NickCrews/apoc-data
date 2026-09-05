@@ -41,6 +41,14 @@ from apoc_data.releases import (
 )
 
 
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--json",
@@ -150,7 +158,7 @@ def _run_scrape(args: argparse.Namespace) -> None:
     directory = Path(args.directory or DEFAULT_DIRECTORY).absolute()
     if directory.is_file():
         raise ValueError("The directory can't be a file")
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
     scrape_all(
         directory,
         headless=args.headless,
@@ -164,7 +172,7 @@ def _run_scrape(args: argparse.Namespace) -> None:
 def _run_convert(args: argparse.Namespace) -> None:
     from apoc_data.convert import convert_all
 
-    logging.basicConfig(level=logging.INFO)
+    _configure_logging()
     paths = convert_all(source=args.source, destination=args.destination)
     if args.json:
         print(json.dumps([str(p) for p in paths], indent=2))
