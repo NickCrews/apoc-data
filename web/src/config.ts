@@ -3,6 +3,14 @@
  */
 
 /**
+ * Vite substitutes `import.meta.env` at build time, so it only exists in the
+ * app. `scripts/gen-llms-txt.ts` imports this module under plain node to reach
+ * the public URLs below, where it doesn't -- hence the fallbacks, rather than a
+ * TypeError on import.
+ */
+const env: Record<string, string | undefined> = import.meta.env ?? {};
+
+/**
  * Base URL for the parquet files this app queries.
  *
  * In production the app is served from https://<user>.github.io/apoc-data/ and
@@ -13,7 +21,7 @@
  *     VITE_DATA_BASE_URL=https://nickcrews.github.io/apoc-data/data/ npm run dev
  */
 export const DATA_BASE_URL: string =
-  import.meta.env.VITE_DATA_BASE_URL || `${import.meta.env.BASE_URL}data/`;
+  env.VITE_DATA_BASE_URL || `${env.BASE_URL ?? '/'}data/`;
 
 /**
  * The canonical public location of the data.
@@ -24,7 +32,7 @@ export const DATA_BASE_URL: string =
 export const PUBLIC_SITE_BASE_URL = 'https://nickcrews.github.io/apoc-data/';
 
 export const PUBLIC_DATA_BASE_URL: string =
-  import.meta.env.VITE_PUBLIC_DATA_BASE_URL || `${PUBLIC_SITE_BASE_URL}data/`;
+  env.VITE_PUBLIC_DATA_BASE_URL || `${PUBLIC_SITE_BASE_URL}data/`;
 
 export const REPO_URL = 'https://github.com/NickCrews/apoc-data';
 
@@ -40,7 +48,7 @@ export function publicDataUrl(fileName: string): string {
 
 /** The raw CSVs sit next to the app, at the root of the Pages site. */
 export function csvUrl(fileName: string): string {
-  return `${import.meta.env.BASE_URL}${fileName}`;
+  return `${env.BASE_URL ?? '/'}${fileName}`;
 }
 
 /**

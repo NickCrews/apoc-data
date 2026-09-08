@@ -25,6 +25,32 @@ questions the dashboard doesn't answer.
 
 ---
 
+## Point an AI At It
+
+<https://nickcrews.github.io/apoc-data/llms.txt>
+
+Hand that URL to any agent that can fetch a URL — Claude Code, Cursor, Codex, a
+ChatGPT with browsing on — and it has everything it needs: the parquet URLs, the
+full schema with row counts and date ranges, and the caveats that otherwise
+produce a confident wrong answer (names spelled six different ways, amended
+reports double-counting, `report_year` not being the year the money moved).
+
+It doesn't repeat the schema — that's in
+[`manifest.json`](https://nickcrews.github.io/apoc-data/data/manifest.json),
+which it links, and any reader that can run the query in it can equally run
+`DESCRIBE`. What it carries is the part that lives nowhere else.
+
+For tools that *can't* fetch a URL — ChatGPT and Gemini, mostly — the
+["Ask an AI" button](https://nickcrews.github.io/apoc-data) on the site copies
+the same guidance as a prompt, with the full schema spelled out inline and your
+question filled in, and points you at
+[the CSV zip](https://nickcrews.github.io/apoc-data/apoc-csvs.zip) to attach.
+
+There's also an [AGENTS.md](AGENTS.md) for agents working on this repo rather
+than on the data.
+
+---
+
 ## Download a Recent Scrape
 
 You can download the daily-scraped CSVs from the GitHub releases (this is what most users want).
@@ -182,4 +208,16 @@ _site/
   data/*.parquet        typed parquet + manifest.json
   *.csv, *.csv.zip      the raw scrape, at the URLs it has always had
   apoc-csvs.zip         every CSV in one file, to upload somewhere
+  llms.txt              the schema and caveats, for AI agents
 ```
+
+`llms.txt` and the "Ask an AI" prompt are two renderings of one source,
+[`web/src/aiGuide.ts`](web/src/aiGuide.ts) — edit the caveats there, never in
+`llms.txt`, and both change together. A copy of `llms.txt` is committed at the
+repo root so its wording is reviewable in a diff; refresh it with
+
+```shell
+cd web && npx tsx ../scripts/gen-llms-txt.ts
+```
+
+It holds no row counts or timestamps, so it only changes when you change it.

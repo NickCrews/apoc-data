@@ -10,7 +10,9 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    // scripts/gen-llms-txt.ts reaches into src/, which reads `import.meta.env`.
+    "types": ["node", "vite/client"]
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "../scripts/gen-llms-txt.ts"]
 }

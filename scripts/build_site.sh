@@ -7,6 +7,7 @@
 #     data/*.parquet          typed parquet + manifest.json
 #     *.csv, *.csv.zip        the raw scrape, at the URLs it has always had
 #     apoc-csvs.zip           every CSV in one file, to upload somewhere
+#     llms.txt                the schema and caveats, for AI agents
 #
 # The app lists every one of those files -- one tab per file -- so there is no
 # separate index page to generate.
@@ -57,6 +58,15 @@ zip -q -j -X "$out/apoc-csvs.zip" "$scraped"/*.csv
 echo "==> Recording the zip in the manifest"
 uv run python "$root/scripts/record_csv_zip.py" \
     "$out/data/manifest.json" "$out/apoc-csvs.zip"
+
+# The caveats the "Ask an AI" button copies to the clipboard, as a file an agent
+# that landed on the site can fetch for itself. Generated from the manifest
+# above rather than written by hand, so a table APOC adds shows up on its own.
+# A copy is committed at the repo root for review; see web/src/aiGuide.ts.
+echo "==> Writing llms.txt"
+abs_out="$(cd "$out" && pwd)"
+(cd "$root/web" && npx --no-install tsx "$root/scripts/gen-llms-txt.ts" \
+    "$abs_out/data/manifest.json" "$abs_out/llms.txt")
 
 echo "==> Done: $out"
 du -sh "$out"

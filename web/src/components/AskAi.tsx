@@ -27,21 +27,9 @@ import {
   XIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type FC } from 'react';
-import {
-  CSV_ZIP_FILE,
-  csvUrl,
-  publicCsvUrl,
-  publicDataUrl,
-  PUBLIC_SITE_BASE_URL,
-  tableInfo,
-} from '../config';
-import {
-  formatBytes,
-  formatCount,
-  useManifest,
-  type Manifest,
-  type ManifestTable,
-} from '../manifest';
+import { buildPrompt } from '../aiGuide';
+import { CSV_ZIP_FILE, csvUrl } from '../config';
+import { formatBytes, useManifest, type Manifest } from '../manifest';
 
 const EXAMPLE_QUESTIONS = [
   'Who were the ten biggest donors to candidates for Governor in 2022?',
@@ -148,7 +136,8 @@ const AskAiCard: FC<{
       <div className="flex flex-col gap-3 overflow-auto p-3">
         <p className="text-muted-foreground text-xs">
           Want an answer this dashboard doesn't give you? Write your question
-          below and paste the pre-filled prompt into your favorite AI tool.
+          below and paste the pre-filled prompt into Claude or ChatGPT
+          (Gemini, as of September 2026 can't run the code needed to do the analysis).
         </p>
 
         <Textarea
@@ -229,129 +218,3 @@ const CsvZipButton: FC<{ manifest: Manifest | undefined }> = ({ manifest }) => {
     </Button>
   );
 };
-
-/**
- * The prompt itself: how to get at the data, what the columns mean, and the
- * gotchas that would otherwise produce a confident-sounding wrong answer.
- *
- * It covers both ways in rather than picking one, because the person pasting
- * it has no way of knowing which applies. The AI does, so it's told to find
- * out by trying, and to come back and ask for the zip rather than quietly
- * answering from memory -- which is what a chat assistant with no web access
- * will otherwise do with a prompt full of URLs it can't open.
- */
-export function buildPrompt(manifest: Manifest, question: string): string {
-  const biggest = biggestCsv(manifest);
-
-  return `I'm analyzing Alaska campaign finance data published by the Alaska Public
-Offices Commission (APOC) and mirrored at ${PUBLIC_SITE_BASE_URL}.
-
-FIRST, work out how you can reach the data. Don't skip this and don't guess:
-
-1. Try to fetch ${publicDataUrl('manifest.json')}
-   If that works, you can read the Parquet files listed below over HTTPS.
-   DuckDB queries them directly, for example:
-
-     SELECT filer_name, sum(amount) AS raised
-     FROM '${publicDataUrl('income.parquet')}'
-     WHERE report_year = 2024
-     GROUP BY 1
-     ORDER BY raised DESC
-     LIMIT 10;
-
-2. If you can't fetch URLs then stop, tell me so, and ask me to download
-
-     ${publicCsvUrl(CSV_ZIP_FILE)}
-
-   and add the zip file to this chat. Then wait for me to do it.
-   Do not answer from memory and do not estimate anything.
-
-The tables. Each one is a Parquet file at the URL shown and a CSV of the same
-name in the zip; the CSV's column headers are the quoted ones:
-
-${describeTables(manifest)}
-
-If you end up working from the CSVs rather than the Parquet, they are APOC's
-raw exports and need cleaning first:
-
-- Every column is text. Rename the headers to the lowercase names above; the
-  rest of this prompt uses those names.
-- Money looks like "$1,234.56", with negatives in parentheses: "($1,234.56)".
-  Strip the "$" and the commas, and turn a wrapping "(...)" into a minus sign.
-- Dates are M/D/YYYY with no zero padding.
-- Some files have a literal "--------" column separating the transaction's own
-  fields from the fields describing the filer who reported it. Drop it. A
-  header can repeat on either side of it — the one after the separator is the
-  filer's.
-- The biggest file by far is ${biggest}.
-  If that's too much to load whole, read it in chunks or with a library that
-  streams (polars or duckdb rather than pandas defaults), or answer from the
-  smaller tables and say which ones you used.
-
-Things to know about this data, either way:
-
-- Money columns are decimal amounts. Negative amounts are refunds or
-  corrections.
-- filer_name is the candidate or group that filed the report. In income and
-  expenditures, last_business_name/first_name are the other party: the donor
-  for income, the payee for expenditures.
-- The same person or business is often spelled several different ways, so
-  grouping by name alone undercounts. Consider fuzzy matching or grouping on
-  a normalized name.
-- A few dates are data-entry typos (years like 1934 or 3030).
-- report_year is the reporting year, which is not always the year the
-  transaction happened — use the date column for that.
-- Rows are as-filed: amended reports appear alongside the originals, so
-  totals can double-count unless you account for the status/amending columns.
-
-My question: ${question || '<write your question here>'}
-
-Analyze the data, possibly presenting your findings in tables and/or charts,
-and point out any assumptions or ambiguities that might affect the answer.
-`;
-}
-
-/** The file worth warning about by name, and by how much it's the big one. */
-function biggestCsv(manifest: Manifest): string {
-  const table = manifest.tables.reduce<ManifestTable | undefined>(
-    (largest, t) =>
-      (t.csv_bytes ?? 0) > (largest?.csv_bytes ?? 0) ? t : largest,
-    undefined,
-  );
-  if (!table) return 'income.csv';
-  const size = table.csv_bytes ? `, ${formatBytes(table.csv_bytes)}` : '';
-  return `${table.csv_file} (${formatCount(table.rows)} rows${size})`;
-}
-
-/** Every table: what a row is, how big it is, and what its columns are called. */
-function describeTables(manifest: Manifest): string {
-  return manifest.tables.map(describeTable).join('\n\n');
-}
-
-function describeTable(table: ManifestTable): string {
-  const info = tableInfo(table.name);
-  const range =
-    table.date_min && table.date_max
-      ? `, ${table.date_min} to ${table.date_max}`
-      : '';
-  const columns = table.columns
-    .map((column) => {
-      // The CSV header only earns a mention where it differs from the Parquet
-      // name, which is most of them but not all.
-      const header =
-        column.csv_column && column.csv_column !== column.name
-          ? ` — ${JSON.stringify(column.csv_column)}`
-          : '';
-      return `      ${column.name} ${column.type}${header}`;
-    })
-    .join('\n');
-
-  return [
-    `  ${table.name} — ${info?.blurb ?? ''}`,
-    `    ${formatCount(table.rows)} rows${range}`,
-    `    ${publicDataUrl(table.file)}`,
-    `    or ${table.csv_file} in the zip`,
-    '    columns:',
-    columns,
-  ].join('\n');
-}
