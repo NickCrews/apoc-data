@@ -259,14 +259,12 @@ FIRST, work out how you can reach the data. Don't skip this and don't guess:
      ORDER BY raised DESC
      LIMIT 10;
 
-2. If you can't fetch URLs then stop,
-   tell me so, and ask me to download
+2. If you can't fetch URLs then stop, tell me so, and ask me to download
 
      ${publicCsvUrl(CSV_ZIP_FILE)}
 
-   and attach the CSVs inside it to this chat. Then wait for me to do it.
-   Do not answer from memory and do not estimate any numbers: everything
-   below describes data you haven't seen yet.
+   and add the zip file to this chat. Then wait for me to do it.
+   Do not answer from memory and do not estimate anything.
 
 The tables. Each one is a Parquet file at the URL shown and a CSV of the same
 name in the zip; the CSV's column headers are the quoted ones:
