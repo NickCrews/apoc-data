@@ -16,9 +16,8 @@ jobs:
   scrape_and_release:
     name: Scrape and Upload Release
     runs-on: ubuntu-latest
-    # A healthy run takes ~30 min. Retries widen that, but we still want a
-    # wedged run to fail in a bounded time rather than burn the 6h default.
-    timeout-minutes: 120
+    # A healthy run takes ~30 min, but some runs in election season 2026 were taking 90.
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
