@@ -158,6 +158,7 @@ def _run_scrape(args: argparse.Namespace) -> None:
     directory = Path(args.directory or DEFAULT_DIRECTORY).absolute()
     if directory.is_file():
         raise ValueError("The directory can't be a file")
+    trace_dir = Path(args.trace_dir).absolute() if args.trace_dir else None
     _configure_logging()
     scrape_all(
         directory,
@@ -166,6 +167,7 @@ def _run_scrape(args: argparse.Namespace) -> None:
         retry_backoff=(
             DEFAULT_RETRY_BACKOFF if args.retry_backoff is None else args.retry_backoff
         ),
+        trace_dir=trace_dir,
     )
 
 
@@ -300,6 +302,16 @@ def main(argv: list[str] | None = None) -> None:
         type=float,
         default=None,
         help="Base seconds for exponential backoff between retries (default: 5)",
+    )
+    scrape_parser.add_argument(
+        "--trace-dir",
+        type=str,
+        default=None,
+        help=(
+            "Save a Playwright trace for each failed attempt to this directory. "
+            "View one with `playwright show-trace <file>` to see the DOM, "
+            "screenshots and network activity at the moment of failure"
+        ),
     )
     scrape_parser.set_defaults(func=_run_scrape)
 

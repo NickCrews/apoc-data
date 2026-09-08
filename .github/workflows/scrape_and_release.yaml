@@ -27,7 +27,22 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Scrape Data
-        run: uv run apoc-data scrape --directory scraped --attempts 6 --retry-backoff 8
+        run: >
+          uv run apoc-data scrape --directory scraped
+          --attempts 6 --retry-backoff 8 --trace-dir traces
+
+      # A trace is written for every failed *attempt*, and with --attempts 6
+      # some failures are routine, so expect this to be non-empty on plenty of
+      # runs that ultimately succeeded. `playwright show-trace <file>` replays
+      # the DOM, screenshots and network activity at the moment things broke.
+      - name: Upload failure traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: traces/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Release
         env:

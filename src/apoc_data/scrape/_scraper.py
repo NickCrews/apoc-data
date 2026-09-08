@@ -17,7 +17,10 @@ import random
 import subprocess
 import sys
 import tempfile
+import time
+from collections import deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -30,6 +33,7 @@ from typing import (
     Iterable,
     Protocol,
 )
+from urllib.parse import urlsplit
 
 from playwright.async_api import BrowserContext, async_playwright, expect
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -37,7 +41,13 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from ._filters import ScrapeFilters, YearEnum
 
 if TYPE_CHECKING:
-    from playwright.async_api import BrowserContext, Download, Page
+    from playwright.async_api import (
+        BrowserContext,
+        Download,
+        Page,
+        Request,
+        Response,
+    )
 
 _logger = logging.getLogger(__name__)
 
@@ -66,6 +76,22 @@ Successful runs have been observed taking ~90s, so the old 120s was cutting
 it very close whenever the server was under load.
 """
 
+_SLOW_RESPONSE_SECONDS = 5.0
+"""Responses slower than this get logged at INFO instead of DEBUG.
+
+Keeps a healthy run's logs quiet while still surfacing the slow requests
+that are the whole reason we're watching the network.
+"""
+_RECENT_RESPONSES = 12
+"""How many completed responses to keep around to dump when an attempt fails."""
+
+_APOC_HOST = "aws.state.ak.us"
+"""The only host whose ordinary traffic tells us anything.
+
+The pages also pull in Google Analytics and DataDome, which together are
+about a third of the requests and none of the signal.
+"""
+
 _RETRYABLE = (
     # Any of the waits in _run_scrape_flow blowing their timeout.
     PlaywrightTimeoutError,
@@ -77,21 +103,143 @@ _RETRYABLE = (
 """Exceptions that indicate a flaky server rather than a broken scraper."""
 
 
+def _short_url(url: str) -> str:
+    """Just the interesting tail of a URL, for log lines.
+
+    The query string is dropped: the analytics beacons on APOC's pages carry
+    several hundred characters of it, which on its own is enough to make a
+    failure summary unreadable in CI logs.
+    """
+    parts = urlsplit(url)
+    return parts.path.rsplit("/", 1)[-1] or parts.netloc
+
+
+class _NetworkMonitor:
+    """Times the page's document/XHR traffic so failures can be diagnosed.
+
+    A Playwright timeout can't tell you *why* it timed out. "The server is
+    still chewing on the query", "the server said no" and "the server
+    answered ages ago and the page is wedged" produce an identical
+    `TimeoutError`, but they call for completely different fixes. The
+    network layer distinguishes them, so we record it and dump it when an
+    attempt fails.
+
+    Note that Playwright's `response` event fires when the response *headers*
+    arrive, so these timings are time-to-first-byte and not body transfer
+    time. That happens to be what we want: the wait that most often blows its
+    timeout, `page.expect_download`, is itself waiting for the server to
+    *begin* sending.
+    """
+
+    _INTERESTING = ("document", "xhr", "fetch")
+
+    def __init__(self, page: Page):
+        self._started: dict[Request, float] = {}
+        self._recent: deque[str] = deque(maxlen=_RECENT_RESPONSES)
+        self._errors: deque[str] = deque(maxlen=_RECENT_RESPONSES)
+        page.on("request", self._on_request)
+        page.on("response", self._on_response)
+        page.on("requestfailed", self._on_request_failed)
+
+    def _on_request(self, request: Request) -> None:
+        # Only APOC's own traffic. The pages also beacon to Google Analytics
+        # and DataDome, which together are about a third of the requests and
+        # none of the signal -- and worse than useless: the analytics beacon
+        # is routinely aborted when we navigate away, which reads as a scary
+        # `FAILED ... net::ERR_ABORTED` on an otherwise healthy scrape.
+        if (
+            request.resource_type in self._INTERESTING
+            and urlsplit(request.url).netloc == _APOC_HOST
+        ):
+            self._started[request] = time.monotonic()
+
+    def _on_response(self, response: Response) -> None:
+        started = self._started.pop(response.request, None)
+        if started is None:
+            return
+        elapsed = time.monotonic() - started
+        line = (
+            f"{response.status} {response.request.method} "
+            f"{_short_url(response.url)} in {elapsed:.1f}s"
+        )
+        if response.status >= 400:
+            # APOC sits behind DataDome, which answers 403 to traffic it
+            # decides is a bot. That looks nothing like a slow server but
+            # produces the same symptom: the results never load and whatever
+            # we're waiting on burns its full timeout.
+            self._errors.append(line)
+            self._recent.append(line)
+            _logger.warning(f"  net: {line}")
+            return
+        self._recent.append(line)
+        level = logging.INFO if elapsed >= _SLOW_RESPONSE_SECONDS else logging.DEBUG
+        _logger.log(level, f"  net: {line}")
+
+    def _on_request_failed(self, request: Request) -> None:
+        started = self._started.pop(request, None)
+        if started is None:
+            return
+        elapsed = time.monotonic() - started
+        line = (
+            f"FAILED {request.method} {_short_url(request.url)} "
+            f"after {elapsed:.1f}s ({request.failure})"
+        )
+        self._errors.append(line)
+        self._recent.append(line)
+        _logger.warning(f"  net: {line}")
+
+    def in_flight(self) -> list[str]:
+        """Requests that were sent but never got a response, oldest first."""
+        now = time.monotonic()
+        return [
+            f"{request.method} {_short_url(request.url)} open for {now - started:.1f}s"
+            for request, started in sorted(self._started.items(), key=lambda kv: kv[1])
+        ]
+
+    def summary(self) -> str:
+        """A description of network state, for failure logs.
+
+        Errors lead: when the server said no, that is the entire story, and
+        it should not be left to be spotted in the tail of `recent`.
+        """
+        parts = []
+        if self._errors:
+            parts.append("errors: " + " | ".join(self._errors))
+        in_flight = self.in_flight()
+        if not in_flight:
+            parts.append("in flight: none (the wait was on the page, not the network)")
+        else:
+            now = time.monotonic()
+            stalled = any(
+                now - started >= _SLOW_RESPONSE_SECONDS
+                for started in self._started.values()
+            )
+            parts.append(
+                "in flight: "
+                + "; ".join(in_flight)
+                + (" <- server never answered these" if stalled else "")
+            )
+        if self._recent:
+            parts.append("recent: " + " | ".join(self._recent))
+        return "\n    ".join(parts)
+
+
 async def _retrying(
-    make_coro: Callable[[], Awaitable[Any]],
+    make_coro: Callable[[int], Awaitable[Any]],
     *,
     what: str,
     attempts: int = DEFAULT_ATTEMPTS,
     backoff: float = DEFAULT_RETRY_BACKOFF,
 ) -> Any:
-    """Await `make_coro()`, retrying with exponential backoff + jitter.
+    """Await `make_coro(attempt)`, retrying with exponential backoff + jitter.
 
-    `make_coro` is a zero-arg callable (not a coroutine) because a coroutine
-    can only be awaited once; we need a fresh one per attempt.
+    `make_coro` is a callable (not a coroutine) because a coroutine can only
+    be awaited once; we need a fresh one per attempt. It receives the 1-based
+    attempt number, which attempts use to name their trace files.
     """
     for attempt in range(1, attempts + 1):
         try:
-            return await make_coro()
+            return await make_coro(attempt)
         except _RETRYABLE as e:
             if attempt == attempts:
                 _logger.error(f"{what}: failed after {attempts} attempts")
@@ -212,11 +360,17 @@ class _ScraperBase:
         filters: ScrapeFilters | None = None,
         attempts: int = DEFAULT_ATTEMPTS,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF,
+        trace_dir: str | Path | None = None,
     ):
         self.destination = Path(destination)
         self.filters = filters or ScrapeFilters()
         self.attempts = attempts
         self.retry_backoff = retry_backoff
+        self.trace_dir = Path(trace_dir) if trace_dir is not None else None
+
+    @property
+    def _what(self) -> str:
+        return f"{self.name} (report_year={self.filters.report_year.value})"
 
     async def __call__(self, browser_context: BrowserContext) -> None:
         _logger.info(
@@ -227,13 +381,13 @@ class _ScraperBase:
         # brand new page, so that a wedged renderer, a half-open Export modal
         # or any other stuck client state can't be inherited by the retry.
         await _retrying(
-            lambda: self._scrape_once(browser_context),
-            what=f"{self.name} (report_year={self.filters.report_year.value})",
+            lambda attempt: self._scrape_once(browser_context, attempt),
+            what=self._what,
             attempts=self.attempts,
             backoff=self.retry_backoff,
         )
 
-    async def _scrape_once(self, browser_context: BrowserContext) -> None:
+    async def _scrape_once(self, browser_context: BrowserContext, attempt: int) -> None:
         """One attempt at scraping + saving, on a page of its own.
 
         A fresh page per attempt is cheap (page creation is milliseconds
@@ -242,12 +396,75 @@ class _ScraperBase:
         previous attempt died in.
         """
         page = await browser_context.new_page()
+        monitor = _NetworkMonitor(page)
+        tracing = await self._start_tracing(browser_context)
+        trace_path: Path | None = None
+        started = time.monotonic()
         try:
             await self._download_and_save(page)
+        except Exception as e:
+            elapsed = time.monotonic() - started
+            _logger.warning(
+                f"{self._what}: attempt {attempt} failed after {elapsed:.1f}s "
+                f"({type(e).__name__})\n    {monitor.summary()}"
+            )
+            # Only failures are worth a trace; a successful attempt's is
+            # discarded below.
+            trace_path = self._trace_path(attempt) if tracing else None
+            raise
         finally:
+            # Stop before closing the page, so the trace keeps its final
+            # screenshot and DOM snapshot.
+            if tracing:
+                await self._stop_tracing(browser_context, trace_path)
             # The download has already been saved to self.destination by now,
             # so it's safe to drop the page it came from.
             await page.close()
+
+    async def _start_tracing(self, browser_context: BrowserContext) -> bool:
+        """Start this attempt's trace recording. Returns whether tracing is on.
+
+        One recording per attempt, rather than one per run sliced into chunks:
+        a context-wide recording keeps appending to a single network log that
+        every saved trace then carries a whole copy of. Measured against APOC
+        that is ~190KB and ~76 network entries per prior attempt, so a failure
+        late in a full run would haul around ~10MB of earlier scrapes' traffic,
+        and every failure would re-ship the whole history again.
+        """
+        if self.trace_dir is None:
+            return False
+        try:
+            await browser_context.tracing.start(
+                screenshots=True, snapshots=True, sources=True
+            )
+        except Exception as e:  # noqa: BLE001 - diagnostics must never fail a scrape
+            # Leaves tracing off for the rest of the run, which is the right
+            # direction to fail in.
+            _logger.warning(f"Could not start tracing: {e}")
+            return False
+        return True
+
+    def _trace_path(self, attempt: int) -> Path:
+        assert self.trace_dir is not None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        name = f"{self.name}_{self.filters.report_year.value}_attempt{attempt}_{stamp}"
+        return self.trace_dir / f"{name}.zip"
+
+    async def _stop_tracing(
+        self, browser_context: BrowserContext, path: Path | None
+    ) -> None:
+        """Stop this attempt's recording, keeping it only if `path` is given."""
+        try:
+            if path is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            await browser_context.tracing.stop(path=path)
+        except Exception as e:  # noqa: BLE001 - diagnostics must never fail a scrape
+            _logger.warning(f"Could not save trace to {path}: {e}")
+        else:
+            if path is not None:
+                _logger.warning(
+                    f"    trace: {path} (view with `playwright show-trace {path}`)"
+                )
 
     async def _download_and_save(self, page: Page) -> None:
         download = await _run_scrape_flow(page, self._HOME_URL, self.filters)
@@ -346,12 +563,14 @@ class _AnyYearMicroBatchScraper(_ScraperBase):
         tempdir: Path | None = None,
         attempts: int = DEFAULT_ATTEMPTS,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF,
+        trace_dir: str | Path | None = None,
     ):
         super().__init__(
             filters=filters,
             destination=destination,
             attempts=attempts,
             retry_backoff=retry_backoff,
+            trace_dir=trace_dir,
         )
         self.tempdir = tempdir
 
@@ -367,6 +586,7 @@ class _AnyYearMicroBatchScraper(_ScraperBase):
                     destination=tmpdir / f"{self.name}_{year.value}.csv",
                     attempts=self.attempts,
                     retry_backoff=self.retry_backoff,
+                    trace_dir=self.trace_dir,
                 )
                 for year in YearEnum
                 if year != YearEnum.any
@@ -418,6 +638,7 @@ def scrape_all(
     headless: bool = True,
     attempts: int = DEFAULT_ATTEMPTS,
     retry_backoff: float = DEFAULT_RETRY_BACKOFF,
+    trace_dir: str | Path | None = None,
 ) -> None:
     """Scrape .CSVs from https://aws.state.ak.us/ApocReports/Campaign/
 
@@ -442,6 +663,11 @@ def scrape_all(
         How many times to try each individual scrape before giving up.
     retry_backoff : float
         Base seconds for the exponential backoff between retries.
+    trace_dir : str or Path, optional
+        If given, write a Playwright trace for every *failed* attempt into
+        this directory. Open one with `playwright show-trace <file>` to see
+        the DOM, screenshots and network activity at the moment of failure.
+        Successful attempts are not kept.
     """
     directory = Path(directory)
     classes: list[type[_ScraperBase]] = [
@@ -459,6 +685,7 @@ def scrape_all(
             destination=directory / f"{cls.name}.csv",
             attempts=attempts,
             retry_backoff=retry_backoff,
+            trace_dir=trace_dir,
         )
         for cls in classes
     ]
