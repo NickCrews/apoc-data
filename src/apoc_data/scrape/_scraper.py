@@ -92,6 +92,26 @@ The pages also pull in Google Analytics and DataDome, which together are
 about a third of the requests and none of the signal.
 """
 
+_BLOCKED_STATUSES = (403, 429)
+"""Statuses that mean APOC's bot protection refused us, rather than erroring."""
+
+_BLOCKED_BACKOFF_FACTOR = 4
+"""How much longer to wait after a block than after ordinary slowness.
+
+Being blocked is a different condition from a busy server. DataDome's rule
+is rate- and behaviour-triggered, so retrying at the usual pace is the thing
+that provoked it; the block does clear on its own if we ease off.
+"""
+
+
+class _BotBlocked(Exception):
+    """APOC's bot protection refused a request.
+
+    Worth its own type because it needs the opposite response to a timeout:
+    there is nothing to wait for, so give up on the attempt immediately.
+    """
+
+
 _RETRYABLE = (
     # Any of the waits in _run_scrape_flow blowing their timeout.
     PlaywrightTimeoutError,
@@ -99,6 +119,8 @@ _RETRYABLE = (
     AssertionError,
     # check_valid_csv: APOC jams a 500 error into the CSV when it's overloaded.
     ValueError,
+    # DataDome hard-blocked us. Intermittent, so a backed-off retry works.
+    _BotBlocked,
 )
 """Exceptions that indicate a flaky server rather than a broken scraper."""
 
@@ -137,6 +159,8 @@ class _NetworkMonitor:
         self._started: dict[Request, float] = {}
         self._recent: deque[str] = deque(maxlen=_RECENT_RESPONSES)
         self._errors: deque[str] = deque(maxlen=_RECENT_RESPONSES)
+        self._blocked = asyncio.Event()
+        self._block_reason: str | None = None
         page.on("request", self._on_request)
         page.on("response", self._on_response)
         page.on("requestfailed", self._on_request_failed)
@@ -170,6 +194,8 @@ class _NetworkMonitor:
             self._errors.append(line)
             self._recent.append(line)
             _logger.warning(f"  net: {line}")
+            if response.status in _BLOCKED_STATUSES:
+                self._note_block(response, line)
             return
         self._recent.append(line)
         level = logging.INFO if elapsed >= _SLOW_RESPONSE_SECONDS else logging.DEBUG
@@ -187,6 +213,43 @@ class _NetworkMonitor:
         self._errors.append(line)
         self._recent.append(line)
         _logger.warning(f"  net: {line}")
+
+    def _note_block(self, response: Response, line: str) -> None:
+        """Record that we've been refused, so the attempt can bail out."""
+        if self._blocked.is_set():
+            return
+        # DataDome says exactly what it objected to, and it's worth having in
+        # the log: "Headless Chrome Client Hint" is a very different problem
+        # from a rate limit.
+        detail = " ".join(
+            f"{name}={response.headers[name]}"
+            for name in ("x-datadome-botname", "x-datadome-ruletype")
+            if name in response.headers
+        )
+        self._block_reason = f"{line}{' ' + detail if detail else ''}"
+        self._blocked.set()
+
+    async def racing_block(self, coro: Awaitable[Any]) -> Any:
+        """Await `coro`, giving up as soon as the site refuses us.
+
+        A block answers the search POST with a CAPTCHA page, so the results
+        never load and whatever wait we're in burns its whole timeout -- up
+        to 180s for the search wait -- on a condition that became impossible
+        in the first 100ms. There is nothing to wait for, so stop now and let
+        the retry's backoff do the actual work of getting unblocked.
+        """
+        work = asyncio.ensure_future(coro)
+        blocked = asyncio.ensure_future(self._blocked.wait())
+        try:
+            await asyncio.wait({work, blocked}, return_when=asyncio.FIRST_COMPLETED)
+            if work.done():
+                return work.result()
+            raise _BotBlocked(self._block_reason or "blocked")
+        finally:
+            for task in (work, blocked):
+                task.cancel()
+            # Let the cancellations land rather than leaving pending tasks.
+            await asyncio.gather(work, blocked, return_exceptions=True)
 
     def in_flight(self) -> list[str]:
         """Requests that were sent but never got a response, oldest first."""
@@ -246,6 +309,8 @@ async def _retrying(
                 raise
             # Jitter so that a whole run doesn't retry in lockstep.
             delay = backoff * 2 ** (attempt - 1) + random.uniform(0, backoff)
+            if isinstance(e, _BotBlocked):
+                delay *= _BLOCKED_BACKOFF_FACTOR
             _logger.warning(
                 f"{what}: attempt {attempt}/{attempts} failed "
                 f"({type(e).__name__}: {str(e).splitlines()[0]}). "
@@ -401,7 +466,7 @@ class _ScraperBase:
         trace_path: Path | None = None
         started = time.monotonic()
         try:
-            await self._download_and_save(page)
+            await monitor.racing_block(self._download_and_save(page))
         except Exception as e:
             elapsed = time.monotonic() - started
             _logger.warning(
