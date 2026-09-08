@@ -135,9 +135,8 @@ async def make_browser_async(headless: bool = True) -> AsyncGenerator[BrowserCon
 
 
 async def _run_scrape_flow(page: Page, url: str, filters: ScrapeFilters) -> Download:
-    # unconditionally reload the page to clear out any old state.
-    # This is what makes the flow safe to retry: a previous attempt may have
-    # died with the Export modal still open, and this resets that.
+    # Each attempt gets a brand new page (see _scrape_once), so this is a
+    # plain navigation rather than a reset of a dirty one.
     page.set_default_timeout(_ACTION_TIMEOUT)
     await page.goto(url)
 
@@ -220,27 +219,37 @@ class _ScraperBase:
         self.retry_backoff = retry_backoff
 
     async def __call__(self, browser_context: BrowserContext) -> None:
-        page = (
-            browser_context.pages[0]
-            if browser_context.pages
-            else await browser_context.new_page()
-        )
         _logger.info(
             f"Downloading {self.name} to {self.destination} using {self.filters}"
         )
         # The APOC server is intermittently slow: any of the waits inside
-        # _run_scrape_flow can blow its timeout. Retry the whole flow, which
-        # starts by reloading the page and so recovers from a half-finished
-        # previous attempt.
+        # _run_scrape_flow can blow its timeout. Retry the whole flow on a
+        # brand new page, so that a wedged renderer, a half-open Export modal
+        # or any other stuck client state can't be inherited by the retry.
         await _retrying(
-            lambda: self._scrape_once(page),
+            lambda: self._scrape_once(browser_context),
             what=f"{self.name} (report_year={self.filters.report_year.value})",
             attempts=self.attempts,
             backoff=self.retry_backoff,
         )
 
-    async def _scrape_once(self, page: Page) -> None:
-        """One attempt at scraping + saving. Safe to call repeatedly."""
+    async def _scrape_once(self, browser_context: BrowserContext) -> None:
+        """One attempt at scraping + saving, on a page of its own.
+
+        A fresh page per attempt is cheap (page creation is milliseconds
+        against a scrape measured in minutes) and it means a retry starts
+        from a genuinely clean renderer rather than from whatever state the
+        previous attempt died in.
+        """
+        page = await browser_context.new_page()
+        try:
+            await self._download_and_save(page)
+        finally:
+            # The download has already been saved to self.destination by now,
+            # so it's safe to drop the page it came from.
+            await page.close()
+
+    async def _download_and_save(self, page: Page) -> None:
         download = await _run_scrape_flow(page, self._HOME_URL, self.filters)
         _logger.info("Download started")
         path = await download.path()
