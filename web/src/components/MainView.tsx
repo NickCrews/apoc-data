@@ -13,6 +13,7 @@ import {useCallback, useEffect, useMemo, useState, type FC} from 'react';
 import {TABLES} from '../config';
 import {useManifest} from '../manifest';
 import {EXPLORE_TAB, TabsProvider} from '../tabs';
+import {FreshnessChip, StaleDataBanner} from './DataFreshness';
 import {ExploreView} from './ExploreView';
 import {FileView} from './FileView';
 
@@ -41,28 +42,34 @@ export const MainView: FC = () => {
   return (
     <TabsProvider value={tabsState}>
       <div className="text-foreground flex h-full flex-col">
-        <div
-          role="tablist"
-          aria-label="Pages"
-          className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2"
-        >
-          <Tab
-            label="Explore"
-            icon={LayoutDashboardIcon}
-            isActive={activeTab === EXPLORE_TAB}
-            onClick={() => setHash(EXPLORE_TAB)}
-          />
-          <div className="bg-border mx-2 h-4 w-px shrink-0" />
-          {tables.map((name) => (
+        <StaleDataBanner manifest={manifest} />
+        {/* The chip sits beside the tab list rather than inside it: the list
+            scrolls sideways in a narrow window, and would take the chip with it. */}
+        <div className="flex shrink-0 items-center gap-2 border-b pr-2">
+          <div
+            role="tablist"
+            aria-label="Pages"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2"
+          >
             <Tab
-              key={name}
-              label={TABLES.find((t) => t.name === name)?.label ?? name}
-              title={`${name}.parquet / ${name}.csv`}
-              icon={FileIcon}
-              isActive={activeTab === name}
-              onClick={() => setHash(name)}
+              label="Explore"
+              icon={LayoutDashboardIcon}
+              isActive={activeTab === EXPLORE_TAB}
+              onClick={() => setHash(EXPLORE_TAB)}
             />
-          ))}
+            <div className="bg-border mx-2 h-4 w-px shrink-0" />
+            {tables.map((name) => (
+              <Tab
+                key={name}
+                label={TABLES.find((t) => t.name === name)?.label ?? name}
+                title={`${name}.parquet / ${name}.csv`}
+                icon={FileIcon}
+                isActive={activeTab === name}
+                onClick={() => setHash(name)}
+              />
+            ))}
+          </div>
+          <FreshnessChip manifest={manifest} />
         </div>
 
         {/* The dashboard stays mounted: rebuilding it means re-running every

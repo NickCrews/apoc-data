@@ -31,10 +31,31 @@ export type ManifestTable = {
   date_column?: string;
   date_min?: string | null;
   date_max?: string | null;
+  /**
+   * The newest date that isn't in the future. APOC's data has typos dated
+   * centuries ahead, and `date_max` is usually one of them.
+   */
+  date_latest?: string | null;
+};
+
+/** The GitHub release a site was built from. */
+export type ManifestRelease = {
+  /** eg `20260909-162459`. */
+  tag: string;
+  /** The release's page, which lists the exact CSVs behind this build. */
+  url: string;
+  /** When the release was published, which is when its scrape finished. */
+  published_at: string;
 };
 
 export type Manifest = {
+  /** When `apoc-data convert` ran. */
   generated_at: string;
+  /**
+   * The release the CSVs were downloaded from. Missing for a site built from a
+   * local scrape, and from manifests written before it was recorded.
+   */
+  release?: ManifestRelease | null;
   tables: ManifestTable[];
   /** The archive of every CSV, if this site was built with one. */
   csv_zip?: {file: string; bytes: number};

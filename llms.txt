@@ -81,7 +81,7 @@ They are APOC's raw exports, and need cleaning first:
 
 ## More
 
-- [manifest.json](https://nickcrews.github.io/apoc-data/data/manifest.json): every table's columns, types, row counts and date ranges, as JSON
+- [manifest.json](https://nickcrews.github.io/apoc-data/data/manifest.json): every table's columns, types, row counts and date ranges, and when the data was scraped, as JSON
 - [All CSVs, zipped](https://nickcrews.github.io/apoc-data/apoc-csvs.zip): for tools that can only read files attached to the chat
 - [Interactive explorer](https://nickcrews.github.io/apoc-data/): the same data as a browser dashboard, with a SQL editor, over DuckDB-WASM
 - [Source repository](https://github.com/NickCrews/apoc-data): the scraper, the CSV-to-Parquet converter, and a Python API and CLI for the releases

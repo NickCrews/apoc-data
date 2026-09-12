@@ -48,10 +48,17 @@ jobs:
         run: npm ci
         working-directory: web
 
+      # `convert` reads release.json to record in the manifest when this data
+      # was scraped, which the app shows readers. Both come from one tag rather
+      # than from asking for "latest" twice, so they can't disagree.
       - name: Download latest release CSVs
         env:
           GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-        run: uv run apoc-data release download latest --destination scraped
+        run: |
+          uv run apoc-data release get latest --json > release.json
+          tag="$(jq -r .tag release.json)"
+          uv run apoc-data release download "$tag" --destination scraped
+          mv release.json scraped/release.json
 
       - name: Build Pages site
         run: scripts/build_site.sh scraped _site

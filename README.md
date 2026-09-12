@@ -109,7 +109,8 @@ duckdb -c "SELECT filer_name, sum(amount) AS raised
 ```
 
 [`data/manifest.json`](https://nickcrews.github.io/apoc-data/data/manifest.json)
-lists every table with its row count, columns and types, and date range.
+lists every table with its row count, columns and types, and date range, plus
+the release the data came from, whose `published_at` is when it was scraped.
 
 Note that the GitHub release URLs above don't send CORS headers, so they can't be
 fetched directly from a browser (eg from duckdb-wasm or a web app). That's why

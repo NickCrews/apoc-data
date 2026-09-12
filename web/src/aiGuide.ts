@@ -151,7 +151,7 @@ ${csvCleaning({
 
 ## More
 
-- [manifest.json](${publicDataUrl('manifest.json')}): every table's columns, types, row counts and date ranges, as JSON
+- [manifest.json](${publicDataUrl('manifest.json')}): every table's columns, types, row counts and date ranges, and when the data was scraped, as JSON
 - [All CSVs, zipped](${publicCsvUrl(CSV_ZIP_FILE)}): for tools that can only read files attached to the chat
 - [Interactive explorer](${PUBLIC_SITE_BASE_URL}): the same data as a browser dashboard, with a SQL editor, over DuckDB-WASM
 - [Source repository](${REPO_URL}): the scraper, the CSV-to-Parquet converter, and a Python API and CLI for the releases

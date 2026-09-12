@@ -20,7 +20,7 @@ import dataclasses
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
@@ -31,6 +31,10 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCE = "scraped/"
 DEFAULT_DESTINATION = "_site/data/"
+
+# Saved next to the CSVs by whoever downloaded them from a GitHub release; see
+# `_read_release`.
+RELEASE_FILE = "release.json"
 
 # APOC puts a literal `--------` column in some exports to separate the
 # transaction's own fields from the fields describing the filer who reported it.
@@ -237,7 +241,9 @@ def convert_all(
     """Convert every CSV in ``source`` to parquet in ``destination``.
 
     Also writes a ``manifest.json`` describing the results, which the web app
-    uses to show schemas and row counts without querying anything.
+    uses to show schemas and row counts without querying anything. If the CSVs
+    came from a GitHub release and a ``release.json`` beside them says which,
+    the manifest records that too: it is what dates the data.
     """
     source = Path(source)
     destination = Path(destination)
@@ -246,7 +252,7 @@ def convert_all(
         raise ValueError(f"No CSVs found in {source}")
     con = _connect()
     paths = [convert_one(csv, destination=destination, con=con) for csv in csvs]
-    write_manifest(destination, csvs=csvs, con=con)
+    write_manifest(destination, csvs=csvs, con=con, release=_read_release(source))
     return paths
 
 
@@ -255,17 +261,26 @@ def write_manifest(
     *,
     csvs: Iterable[Path] = (),
     con: duckdb.DuckDBPyConnection | None = None,
+    release: dict | None = None,
 ) -> Path:
-    """Describe every parquet file in ``destination`` in a ``manifest.json``."""
+    """Describe every parquet file in ``destination`` in a ``manifest.json``.
+
+    ``release`` is the GitHub release the CSVs were downloaded from, if any, as
+    returned by ``_read_release``. Its ``published_at`` is when that scrape
+    finished, which is the date the web app shows readers. ``generated_at`` is
+    only when this ran, which for a local scrape is the best there is.
+    """
     con = con if con is not None else _connect()
     destination = Path(destination)
     csv_paths = {p.stem: p for p in csvs}
+    now = datetime.now(timezone.utc)
     tables = [
-        _describe_table(con, parquet, csv=csv_paths.get(parquet.stem))
+        _describe_table(con, parquet, csv=csv_paths.get(parquet.stem), today=now.date())
         for parquet in sorted(destination.glob("*.parquet"))
     ]
     manifest = {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": now.isoformat(timespec="seconds"),
+        "release": release,
         "tables": tables,
     }
     out = destination / "manifest.json"
@@ -274,8 +289,42 @@ def write_manifest(
     return out
 
 
+def _read_release(source: Path) -> dict | None:
+    """The GitHub release the CSVs in ``source`` came from, if we know it.
+
+    The Pages build saves ``apoc-data release get <tag> --json`` beside the
+    CSVs it downloads, as ``release.json``. It is only believed if every CSV is
+    exactly the size that release says. Otherwise a fresh local scrape into a
+    folder that once held a download would go out under the old release's
+    date, and the app would tell readers the data is older than it is.
+    """
+    path = source / RELEASE_FILE
+    if not path.exists():
+        return None
+    raw = json.loads(path.read_text())
+    sizes = {asset["name"]: asset["size"] for asset in raw["assets"]}
+    mismatched = [
+        csv.name
+        for csv in sorted(source.glob("*.csv"))
+        if sizes.get(csv.name) != csv.stat().st_size
+    ]
+    if mismatched:
+        _logger.warning(
+            "Ignoring %s: these CSVs differ from release %s's: %s",
+            path,
+            raw["tag"],
+            ", ".join(mismatched),
+        )
+        return None
+    return {
+        "tag": raw["tag"],
+        "url": raw["url"],
+        "published_at": raw["published_at"],
+    }
+
+
 def _describe_table(
-    con: duckdb.DuckDBPyConnection, parquet: Path, *, csv: Path | None
+    con: duckdb.DuckDBPyConnection, parquet: Path, *, csv: Path | None, today: date
 ) -> dict:
     src = _quote_str(str(parquet))
     # The parquet columns are snake_case; the CSV keeps APOC's own headers
@@ -308,12 +357,19 @@ def _describe_table(
         # The first date column is the transaction/report date, which is the
         # one worth showing as the table's date range.
         date_column = date_columns[0]
-        lo, hi = con.execute(
-            f"SELECT min({_quote_ident(date_column)}), max({_quote_ident(date_column)}) FROM {src}"
+        col = _quote_ident(date_column)
+        lo, hi, latest = con.execute(
+            f"SELECT min({col}), max({col}), max({col}) FILTER (WHERE {col} <= ?)"
+            f" FROM {src}",
+            [today],
         ).fetchone()  # type: ignore[misc]
         table["date_column"] = date_column
         table["date_min"] = lo.isoformat() if lo else None
         table["date_max"] = hi.isoformat() if hi else None
+        # APOC's data has typos dated centuries ahead (a contribution in the
+        # year 3015), so date_max says nothing about how current the data is.
+        # The newest date that has already happened does.
+        table["date_latest"] = latest.isoformat() if latest else None
     return table
 
 
